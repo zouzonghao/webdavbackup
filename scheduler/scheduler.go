@@ -144,33 +144,43 @@ func (s *Scheduler) runScheduledTask(st *scheduledTask) {
 }
 
 func (s *Scheduler) executeTask(st *scheduledTask) {
-	s.runningMu.Lock()
-	if s.runningTasks[st.task.Name] {
-		s.runningMu.Unlock()
+	if !s.tryStartTask(st.task.Name) {
 		logger.Warn("[%s] Task is already running, skipping", st.task.Name)
 		return
 	}
-	s.runningTasks[st.task.Name] = true
-	s.runningMu.Unlock()
-
-	defer func() {
-		s.runningMu.Lock()
-		delete(s.runningTasks, st.task.Name)
-		s.runningMu.Unlock()
-	}()
+	defer s.finishTask(st.task.Name)
 
 	logger.Info("[%s] Executing scheduled task", st.task.Name)
+	s.runTaskWithStatus(st.task)
+}
 
+func (s *Scheduler) tryStartTask(name string) bool {
+	s.runningMu.Lock()
+	defer s.runningMu.Unlock()
+	if s.runningTasks[name] {
+		return false
+	}
+	s.runningTasks[name] = true
+	return true
+}
+
+func (s *Scheduler) finishTask(name string) {
+	s.runningMu.Lock()
+	delete(s.runningTasks, name)
+	s.runningMu.Unlock()
+}
+
+func (s *Scheduler) runTaskWithStatus(task *config.BackupTask) {
 	status := &ExecutionStatus{
-		TaskName:  st.task.Name,
+		TaskName:  task.Name,
 		Status:    "running",
 		StartTime: time.Now(),
 	}
 	s.setExecutionStatus(status)
 
 	if s.taskFunc != nil {
-		if err := s.taskFunc(st.task); err != nil {
-			logger.Error("[%s] Task execution failed: %v", st.task.Name, err)
+		if err := s.taskFunc(task); err != nil {
+			logger.Error("[%s] Task execution failed: %v", task.Name, err)
 			status.Status = "failed"
 			status.Error = err.Error()
 		} else {
@@ -244,47 +254,19 @@ func (s *Scheduler) RunTaskNow(name string) error {
 }
 
 func (s *Scheduler) RunTaskByName(task *config.BackupTask) error {
-	s.runningMu.Lock()
-	if s.runningTasks[task.Name] {
-		s.runningMu.Unlock()
+	if !s.tryStartTask(task.Name) {
 		return fmt.Errorf("task %s is already running", task.Name)
 	}
-	s.runningTasks[task.Name] = true
-	s.runningMu.Unlock()
-
-	defer func() {
-		s.runningMu.Lock()
-		delete(s.runningTasks, task.Name)
-		s.runningMu.Unlock()
-	}()
+	defer s.finishTask(task.Name)
 
 	logger.Info("[%s] Manual execution triggered", task.Name)
+	s.runTaskWithStatus(task)
 
-	status := &ExecutionStatus{
-		TaskName:  task.Name,
-		Status:    "running",
-		StartTime: time.Now(),
+	status := s.GetExecutionStatus(task.Name)
+	if status != nil && status.Status == "failed" {
+		return fmt.Errorf("%s", status.Error)
 	}
-	s.setExecutionStatus(status)
-
-	var execErr error
-	if s.taskFunc != nil {
-		if err := s.taskFunc(task); err != nil {
-			logger.Error("[%s] Task execution failed: %v", task.Name, err)
-			status.Status = "failed"
-			status.Error = err.Error()
-			execErr = err
-		} else {
-			status.Status = "success"
-		}
-	} else {
-		status.Status = "success"
-	}
-
-	status.EndTime = time.Now()
-	s.setExecutionStatus(status)
-
-	return execErr
+	return nil
 }
 
 func (s *Scheduler) GetTaskStatus(name string) *TaskStatus {

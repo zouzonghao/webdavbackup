@@ -29,11 +29,12 @@ type ScheduleConfig struct {
 }
 
 type BackupTask struct {
-	Name     string         `yaml:"name" json:"name"`
-	Enabled  bool           `yaml:"enabled" json:"enabled"`
-	Paths    []BackupItem   `yaml:"paths" json:"paths"`
-	WebDAV   []string       `yaml:"webdav" json:"webdav"`
-	Schedule ScheduleConfig `yaml:"schedule" json:"schedule"`
+	Name       string         `yaml:"name" json:"name"`
+	Enabled    bool           `yaml:"enabled" json:"enabled"`
+	Paths      []BackupItem   `yaml:"paths" json:"paths"`
+	WebDAV     []string       `yaml:"webdav" json:"webdav"`
+	Schedule   ScheduleConfig `yaml:"schedule" json:"schedule"`
+	EncryptPwd string         `yaml:"encrypt_pwd" json:"encrypt_pwd"`
 }
 
 type WebServerConfig struct {
@@ -131,19 +132,14 @@ func saveConfigLocked(path string, cfg *Config) error {
 func Save(path string, cfg *Config) error {
 	configMu.Lock()
 	defer configMu.Unlock()
-
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
+	return saveConfigLocked(path, cfg)
 }
 
 func (c *Config) GetWebDAVByName(name string) *WebDAVConfig {
 	for i := range c.WebDAV {
 		if c.WebDAV[i].Name == name {
-			copy := c.WebDAV[i]
-			return &copy
+			result := c.WebDAV[i]
+			return &result
 		}
 	}
 	return nil
@@ -152,8 +148,8 @@ func (c *Config) GetWebDAVByName(name string) *WebDAVConfig {
 func (c *Config) GetTaskByName(name string) *BackupTask {
 	for i := range c.Tasks {
 		if c.Tasks[i].Name == name {
-			copy := c.Tasks[i]
-			return &copy
+			result := c.Tasks[i]
+			return &result
 		}
 	}
 	return nil

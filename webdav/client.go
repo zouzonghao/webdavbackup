@@ -43,7 +43,7 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 
 	if pr.total > 0 {
 		progress := float64(pr.read) / float64(pr.total) * 100
-		if pr.read-pr.lastLog > pr.total/20 || pr.read == pr.total {
+		if pr.read-pr.lastLog > pr.total/10 || pr.read == pr.total {
 			logger.Info("[%s] Upload progress: %.1f%% (%.2f MB / %.2f MB)",
 				pr.name, progress,
 				float64(pr.read)/1024/1024,

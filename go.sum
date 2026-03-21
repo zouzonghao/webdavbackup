@@ -1,3 +1,7 @@
+github.com/mzky/zip v0.0.0-20240709011722-16a3ac64cd1d h1:Kj5e8maLYr15fcaWGwjobjhlGcvQgzmOoVhj+Fc4Ue4=
+github.com/mzky/zip v0.0.0-20240709011722-16a3ac64cd1d/go.mod h1:nbeXRTTEZNdpEvY28aGERF/6Du3a3BfcPr1ETZ3anwI=
+github.com/yeka/zip v0.0.0-20231116150916-03d6312748a9 h1:K8gF0eekWPEX+57l30ixxzGhHH/qscI3JCnuhbN6V4M=
+github.com/yeka/zip v0.0.0-20231116150916-03d6312748a9/go.mod h1:9BnoKCcgJ/+SLhfAXj15352hTOuVmG5Gzo8xNRINfqI=
 golang.org/x/crypto v0.31.0 h1:ihbySMvVjLAeSH1IbfcRTkD/iNscyz8rGzjF/E5hV6U=
 golang.org/x/crypto v0.31.0/go.mod h1:kDsLvtWBEx7MV9tJOj9bnXsPbxwJQ6csT/x4KIN4Ssk=
 golang.org/x/net v0.33.0 h1:74SYHlV8BIgHIFC/LrYkOGIwL19eTYXQ5wc6TBuO36I=

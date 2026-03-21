@@ -116,14 +116,20 @@ func runDaemon(cfg *config.Config, executor *backup.Executor) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	serverErr := make(chan error, 1)
 	go func() {
-		<-sigChan
-		logger.Info("Shutting down...")
-		os.Exit(0)
+		serverErr <- server.Start()
 	}()
 
-	if err := server.Start(); err != nil {
-		logger.Error("Web server error: %v", err)
-		os.Exit(1)
+	select {
+	case <-sigChan:
+		logger.Info("Shutting down...")
+		server.Stop()
+		logger.Info("Shutdown complete")
+	case err := <-serverErr:
+		if err != nil {
+			logger.Error("Web server error: %v", err)
+			os.Exit(1)
+		}
 	}
 }

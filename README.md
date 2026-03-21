@@ -9,6 +9,7 @@
 - **只管备份，不管存储**：备份文件上传到 WebDAV 后，存储空间管理、旧备份清理由用户自行处理
 - **只管上传，不管恢复**：恢复操作通过手动下载备份文件解压即可，无需工具支持
 - **日志即通知**：所有执行结果输出到 stdout，通过 systemd/docker 等服务管理器持久化，配合 WebUI 实时查看
+- **内存监控**：任务完成后输出峰值内存使用情况，便于监控资源消耗
 - **明文配置**：配置文件中的密码明文存储，由用户自行保障配置文件安全
 
 ## 功能边界
@@ -19,8 +20,10 @@
 | 手动备份 | ✅ | WebUI 或命令行触发 |
 | 多 WebDAV | ✅ | 支持同时上传到多个服务器 |
 | 流式传输 | ✅ | 不占用本地磁盘和内存 |
+| AES-256 加密 | ✅ | ZIP AES-256 加密，Windows 可直接解压 |
 | Web 管理 | ✅ | 内嵌管理界面 |
 | 实时日志 | ✅ | WebSocket 推送 |
+| 密码回调 | ❌ | 编辑任务页面可查看密码 |
 | 备份保留策略 | ❌ | 由用户在 WebDAV 端管理 |
 | 备份历史记录 | ❌ | 通过系统日志查看 |
 | 恢复功能 | ❌ | 手动下载解压 |
@@ -30,7 +33,7 @@
 | 配置验证 | ❌ | 配置错误会在运行时报错 |
 | 健康检查端点 | ❌ | 通过日志监控进程状态 |
 | HTTP 请求日志 | ❌ | 减少日志噪音 |
-| 优雅关闭 | ❌ | 下次运行继续备份即可 |
+| 优雅关闭 | ✅ | 收到信号后停止 Scheduler 和 HTTP Server |
 | 自定义备份路径 | ❌ | 使用绝对路径，解压时注意 |
 | TLS 证书跳过 | ❌ | 请使用正规证书 |
 
@@ -40,7 +43,7 @@
 webdav-backup/
 ├── config/config.go       # 配置管理（YAML 格式）
 ├── logger/logger.go       # 日志模块（输出到 stdout）
-├── backup/backup.go       # 备份模块（tar + gzip 流式打包）
+├── backup/backup.go       # 备份模块（ZIP 流式打包）
 ├── webdav/client.go       # WebDAV 客户端
 ├── scheduler/scheduler.go # 内置定时任务调度器
 ├── webserver/server.go    # Web 服务器 + 内嵌管理界面
@@ -53,7 +56,7 @@ webdav-backup/
 |------|------|
 | Config | YAML 配置文件解析，支持热更新 |
 | Logger | 结构化日志输出到 stdout |
-| Backup | Tar + Gzip 流式打包，直接输出到 WebDAV |
+| Backup | ZIP 流式打包，支持 AES-256 加密 |
 | WebDAV Client | WebDAV 协议客户端，流式上传 |
 | Scheduler | 内置定时任务调度，支持 hourly/daily/weekly |
 | WebServer | 内嵌 Web 管理界面，Basic Auth 认证 |
@@ -61,10 +64,39 @@ webdav-backup/
 ### 备份流程
 
 ```
-源文件/目录 → Tar 打包 → Gzip 压缩 → 流式上传到 WebDAV
+源文件/目录 → ZIP 打包压缩 → AES-256 加密（可选） → 流式上传到 WebDAV
 ```
 
 **特点**：全程流式传输，不写入本地硬盘，不占用内存。
+
+### ZIP AES-256 加密
+
+如果任务配置了加密密码，备份文件会使用 ZIP AES-256 加密：
+
+- **加密算法**：AES-256（WinZip AES 加密标准）
+- **文件后缀**：`.zip`
+- **兼容性**：Windows 可用 7-Zip、WinZip、Bandizip 等工具直接解压
+
+**解压方法**：
+
+Windows 用户可直接使用 7-Zip 等工具打开 ZIP 文件，输入密码即可解压。
+
+Linux/macOS 用户可使用 7z 命令：
+
+```bash
+# 安装 p7zip（如未安装）
+# Ubuntu/Debian: apt install p7zip-full
+# Alpine: apk add p7zip
+# macOS: brew install p7zip
+
+# 解压到当前目录
+7z x backup.zip -p"your-password"
+
+# 解压到指定目录
+7z x backup.zip -p"your-password" -o/
+```
+
+> ⚠️ **安全提示**：密码以明文存储在配置文件中，编辑任务页面可直接查看。请确保配置文件和 Web 界面的访问安全。
 
 ## 使用方式
 
@@ -184,6 +216,7 @@ tasks:
       type: daily
       hour: 2
       minute: 0
+    encrypt_pwd: "your-secret-password"
 
 webserver:
   enabled: true
@@ -213,6 +246,7 @@ webserver:
 | paths | 备份路径列表（自动识别文件/目录） |
 | webdav | WebDAV 服务器名称列表 |
 | schedule | 调度配置 |
+| encrypt_pwd | 加密密码（可选，用于 ZIP AES-256 加密） |
 
 #### 调度配置
 
@@ -236,25 +270,33 @@ webserver:
 
 ## 备份文件格式
 
-- 文件名：`任务名_YYYYMMDD_HHMMSS.tar.gz`
-- 压缩格式：Gzip
-- 打包格式：Tar（保留原始目录结构）
+- 文件名：`任务名_YYYYMMDD_HHMMSS.zip`
+- 压缩格式：ZIP（Deflate）
+- 加密格式：AES-256（可选，WinZip 标准）
 
 ### 恢复备份
 
-备份文件使用绝对路径打包，解压时会恢复到原始位置：
+**未加密备份**：
 
 ```bash
-# 恢复到原始路径（需要 root 权限）
-tar -xzf backup.tar.gz -C /
+# Linux/macOS
+unzip backup.zip -d /
 
-# 或查看压缩包内容后再决定
-tar -tzf backup.tar.gz
+# 或查看压缩包内容
+unzip -l backup.zip
 ```
 
-**注意**：由于使用绝对路径，解压时 `-C /` 会将文件恢复到备份时的原始位置。
+**加密备份**：
 
-`tar: Removing leading '/' from member names` 是正常提示，表示 tar 移除了路径前导斜杠（安全机制），配合 `-C /` 仍能恢复到原位。
+Windows 用户直接用 7-Zip 打开，输入密码解压。
+
+Linux/macOS 用户：
+
+```bash
+7z x backup.zip -p"your-password" -o/
+```
+
+**注意**：由于使用绝对路径，解压时会恢复到备份时的原始位置。
 
 ### 日志与执行记录
 

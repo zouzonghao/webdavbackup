@@ -19,26 +19,27 @@ func NewExecutor(cfg *config.Config) *Executor {
 	return &Executor{config: cfg}
 }
 
-func (e *Executor) Execute(task *config.BackupTask) error {
-	logger.Info("[%s] Starting backup task", task.Name)
+type memTracker struct {
+	maxAlloc uint64
+	maxSys   uint64
+}
 
-	var memStatsStop = make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-memStatsStop:
-				return
-			case <-time.After(1 * time.Second):
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				logger.Info("[%s] Memory - Alloc: %.2f MB, Sys: %.2f MB",
-					task.Name,
-					float64(m.Alloc)/1024/1024,
-					float64(m.Sys)/1024/1024)
-			}
-		}
-	}()
-	defer close(memStatsStop)
+func (m *memTracker) update() {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	if stats.Alloc > m.maxAlloc {
+		m.maxAlloc = stats.Alloc
+	}
+	if stats.Sys > m.maxSys {
+		m.maxSys = stats.Sys
+	}
+}
+
+func (e *Executor) Execute(task *config.BackupTask) error {
+	logger.Info("[%s] ========== Starting backup task ==========", task.Name)
+
+	mem := &memTracker{}
+	mem.update()
 
 	if len(task.Paths) == 0 {
 		return fmt.Errorf("no backup paths configured")
@@ -68,7 +69,7 @@ func (e *Executor) Execute(task *config.BackupTask) error {
 	taskCopy.Paths = validPaths
 
 	timestamp := time.Now().Format("20060102_150405")
-	remotePath := fmt.Sprintf("%s_%s.tar.gz", taskCopy.Name, timestamp)
+	remotePath := fmt.Sprintf("%s_%s.zip", taskCopy.Name, timestamp)
 
 	var uploadErrors []string
 	for _, webdavName := range taskCopy.WebDAV {
@@ -92,14 +93,15 @@ func (e *Executor) Execute(task *config.BackupTask) error {
 			continue
 		}
 
-		backupSvc := New()
-		result, err := backupSvc.CreateStream(&taskCopy)
+		mem.update()
+		result, err := CreateStream(&taskCopy)
 		if err != nil {
 			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: failed to create stream: %v", wdCfg.Name, err))
 			continue
 		}
 
-		logger.Info("[%s] Uploading to %s as %s (%.2f MB)", taskCopy.Name, wdCfg.Name, remotePath, float64(result.TotalSize)/1024/1024)
+		mem.update()
+		logger.Info("[%s] Uploading to %s as %s (source: %.2f MB)", taskCopy.Name, wdCfg.Name, remotePath, float64(result.TotalSize)/1024/1024)
 
 		if err := client.UploadStream(result.Stream, result.TotalSize, remotePath); err != nil {
 			result.Stream.Close()
@@ -108,13 +110,24 @@ func (e *Executor) Execute(task *config.BackupTask) error {
 		}
 		result.Stream.Close()
 
-		logger.Info("[%s] Backup uploaded successfully to %s", taskCopy.Name, wdCfg.Name)
+		zipSize := <-result.SizeChan
+		mem.update()
+		logger.Info("[%s] Backup uploaded to %s - source: %.2f MB, compressed: %.2f MB (%.1f%%)",
+			taskCopy.Name, wdCfg.Name,
+			float64(result.TotalSize)/1024/1024,
+			float64(zipSize)/1024/1024,
+			float64(zipSize)/float64(result.TotalSize)*100)
 	}
 
 	if len(uploadErrors) > 0 {
 		return fmt.Errorf("upload errors: %v", uploadErrors)
 	}
 
-	logger.Info("[%s] Backup task completed successfully", taskCopy.Name)
+	mem.update()
+	logger.Info("[%s] Memory peak - Alloc: %.2f MB, Sys: %.2f MB",
+		task.Name,
+		float64(mem.maxAlloc)/1024/1024,
+		float64(mem.maxSys)/1024/1024)
+	logger.Info("[%s] ========== Backup task completed ==========", taskCopy.Name)
 	return nil
 }
