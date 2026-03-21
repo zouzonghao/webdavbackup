@@ -1,18 +1,12 @@
-FROM alpine:3.19 AS builder
+FROM alpine:3.19
 
-RUN apk add --no-cache go git musl-dev
+RUN apk add --no-cache ca-certificates tzdata
 
-WORKDIR /src
+WORKDIR /app
 
-COPY go.mod go.sum ./
-RUN go mod download
+ARG TARGETARCH
+COPY binaries/webdavbackup-linux-${TARGETARCH} /app/webdavbackup
 
-COPY . .
+RUN chmod +x /app/webdavbackup
 
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
-    -ldflags='-s -w -linkmode external -extldflags "-static"' \
-    -o /output/webdav-backup .
-
-FROM scratch AS binary
-
-COPY --from=builder /output/webdav-backup /webdav-backup
+ENTRYPOINT ["/app/webdavbackup"]

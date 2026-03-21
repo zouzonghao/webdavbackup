@@ -74,11 +74,6 @@ func (s *Server) broadcastLog(level, msg string) {
 }
 
 func (s *Server) Start() error {
-	if !s.config.WebServer.Enabled {
-		logger.Info("Web server is disabled")
-		return nil
-	}
-
 	s.scheduler = scheduler.NewScheduler(s.taskFunc)
 	s.scheduler.Start(s.config)
 
@@ -96,7 +91,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/status", s.authMiddleware(s.handleStatus))
 	mux.HandleFunc("/ws", s.authMiddlewareWS(websocket.Handler(s.handleWebSocket)).ServeHTTP)
 
-	addr := fmt.Sprintf(":%d", s.config.WebServer.Port)
+	addr := fmt.Sprintf("%s:%d", s.config.WebServer.Host, s.config.WebServer.Port)
 	s.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: mux,

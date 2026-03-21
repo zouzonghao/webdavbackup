@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  webdavbackup:
+    image: sanqi37/webdavbackup:latest
+    container_name: webdavbackup
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - /your-path1:/your-path1
+      - /your-path2:/your-path2

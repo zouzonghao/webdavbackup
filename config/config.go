@@ -38,7 +38,7 @@ type BackupTask struct {
 }
 
 type WebServerConfig struct {
-	Enabled  bool   `yaml:"enabled" json:"enabled"`
+	Host     string `yaml:"host" json:"host"`
 	Port     int    `yaml:"port" json:"port"`
 	Username string `yaml:"username" json:"username"`
 	Password string `yaml:"password" json:"password"`
@@ -96,7 +96,7 @@ func defaultConfig() *Config {
 		WebDAV: []WebDAVConfig{},
 		Tasks:  []BackupTask{},
 		WebServer: WebServerConfig{
-			Enabled:  true,
+			Host:     "0.0.0.0",
 			Port:     8080,
 			Username: "admin",
 			Password: "admin",
@@ -116,6 +116,9 @@ func applyDefaults(cfg *Config) {
 		}
 	}
 
+	if cfg.WebServer.Host == "" {
+		cfg.WebServer.Host = "0.0.0.0"
+	}
 	if cfg.WebServer.Port == 0 {
 		cfg.WebServer.Port = 8080
 	}

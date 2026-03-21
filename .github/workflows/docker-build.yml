@@ -1,0 +1,116 @@
+name: CI-CD - Build and Push Docker Image
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'b[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: sanqi37/webdavbackup
+
+jobs:
+  build-binary:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            arch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            arch: arm64
+          - os: macos-latest
+            goos: darwin
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true 
+
+      - name: Build binary
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.arch }} CGO_ENABLED=0 \
+            go build -o webdavbackup-${{ matrix.goos }}-${{ matrix.arch }} .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webdavbackup-${{ matrix.goos }}-${{ matrix.arch }}
+          path: webdavbackup-${{ matrix.goos }}-${{ matrix.arch }}
+          retention-days: 1
+
+  build-docker:
+    runs-on: ubuntu-latest
+    needs: [build-binary]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: webdavbackup-linux-amd64
+          path: ./binaries
+      - uses: actions/download-artifact@v4
+        with:
+          name: webdavbackup-linux-arm64
+          path: ./binaries
+
+      - uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},prefix=v,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},prefix=v,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}},prefix=v,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{version}}-beta,prefix=b,enable=${{ startsWith(github.ref, 'refs/tags/b') }}
+            type=raw,value=beta,enable=${{ startsWith(github.ref, 'refs/tags/b') }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-docker]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: webdavbackup-*
+          path: .
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            webdavbackup-linux-amd64
+            webdavbackup-linux-arm64
+            webdavbackup-darwin-arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
