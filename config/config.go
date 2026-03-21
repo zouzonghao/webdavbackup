@@ -19,7 +19,6 @@ type WebDAVConfig struct {
 
 type BackupItem struct {
 	Path string `yaml:"path" json:"path"`
-	Type string `yaml:"type" json:"type"`
 }
 
 type ScheduleConfig struct {
@@ -64,8 +63,8 @@ func GetConfigPath() string {
 }
 
 func Load(path string) (*Config, error) {
-	configMu.RLock()
-	defer configMu.RUnlock()
+	configMu.Lock()
+	defer configMu.Unlock()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -74,7 +73,7 @@ func Load(path string) (*Config, error) {
 			if createErr := createConfigDir(path); createErr != nil {
 				return nil, fmt.Errorf("failed to create config directory: %w", createErr)
 			}
-			if saveErr := saveConfig(path, cfg); saveErr != nil {
+			if saveErr := saveConfigLocked(path, cfg); saveErr != nil {
 				return nil, fmt.Errorf("failed to create default config: %w", saveErr)
 			}
 			return cfg, nil
@@ -121,7 +120,7 @@ func applyDefaults(cfg *Config) {
 	}
 }
 
-func saveConfig(path string, cfg *Config) error {
+func saveConfigLocked(path string, cfg *Config) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
@@ -143,7 +142,8 @@ func Save(path string, cfg *Config) error {
 func (c *Config) GetWebDAVByName(name string) *WebDAVConfig {
 	for i := range c.WebDAV {
 		if c.WebDAV[i].Name == name {
-			return &c.WebDAV[i]
+			copy := c.WebDAV[i]
+			return &copy
 		}
 	}
 	return nil
@@ -152,7 +152,8 @@ func (c *Config) GetWebDAVByName(name string) *WebDAVConfig {
 func (c *Config) GetTaskByName(name string) *BackupTask {
 	for i := range c.Tasks {
 		if c.Tasks[i].Name == name {
-			return &c.Tasks[i]
+			copy := c.Tasks[i]
+			return &copy
 		}
 	}
 	return nil

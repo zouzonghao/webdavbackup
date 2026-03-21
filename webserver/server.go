@@ -92,7 +92,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/webdav/", s.authMiddleware(s.handleWebDAVItem))
 	mux.HandleFunc("/api/config", s.authMiddleware(s.handleConfig))
 	mux.HandleFunc("/api/status", s.authMiddleware(s.handleStatus))
-	mux.Handle("/ws", websocket.Handler(s.handleWebSocket))
+	mux.HandleFunc("/ws", s.authMiddlewareWS(websocket.Handler(s.handleWebSocket)).ServeHTTP)
 
 	addr := fmt.Sprintf(":%d", s.config.WebServer.Port)
 	logger.Info("Web server starting on %s", addr)
@@ -236,6 +236,18 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (s *Server) authMiddlewareWS(handler websocket.Handler) websocket.Handler {
+	return func(ws *websocket.Conn) {
+		req := ws.Request()
+		cookie, err := req.Cookie("auth")
+		if err != nil || cookie.Value == "" || !s.validateToken(cookie.Value) {
+			ws.Close()
+			return
+		}
+		handler(ws)
+	}
+}
+
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -371,7 +383,9 @@ func (s *Server) runTask(w http.ResponseWriter, r *http.Request, name string) {
 	}
 
 	go func() {
-		if s.taskFunc != nil {
+		if s.scheduler != nil {
+			s.scheduler.RunTaskByName(task)
+		} else if s.taskFunc != nil {
 			s.taskFunc(task)
 		}
 	}()
@@ -383,8 +397,12 @@ func (s *Server) runAllTasks(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		for i := range s.config.Tasks {
 			task := &s.config.Tasks[i]
-			if task.Enabled && s.taskFunc != nil {
-				s.taskFunc(task)
+			if task.Enabled {
+				if s.scheduler != nil {
+					s.scheduler.RunTaskByName(task)
+				} else if s.taskFunc != nil {
+					s.taskFunc(task)
+				}
 			}
 		}
 	}()
@@ -445,7 +463,6 @@ func (s *Server) getWebDAV(w http.ResponseWriter, r *http.Request, name string) 
 		"name":     wd.Name,
 		"url":      wd.URL,
 		"username": wd.Username,
-		"password": wd.Password,
 		"timeout":  wd.Timeout,
 	}})
 }
@@ -480,6 +497,13 @@ func (s *Server) updateWebDAV(w http.ResponseWriter, r *http.Request, name strin
 	if err := json.NewDecoder(r.Body).Decode(&wd); err != nil {
 		s.jsonResponse(w, APIResponse{Success: false, Message: err.Error()}, http.StatusBadRequest)
 		return
+	}
+
+	if wd.Password == "" {
+		existing := s.config.GetWebDAVByName(name)
+		if existing != nil {
+			wd.Password = existing.Password
+		}
 	}
 
 	s.config.DeleteWebDAV(name)
@@ -537,8 +561,30 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	statuses := s.scheduler.GetAllTaskStatus()
-	s.jsonResponse(w, APIResponse{Success: true, Data: statuses})
+	taskStatuses := s.scheduler.GetAllTaskStatus()
+	execStatuses := s.scheduler.GetAllExecutionStatus()
+
+	result := make([]map[string]interface{}, 0, len(taskStatuses))
+	for _, ts := range taskStatuses {
+		item := map[string]interface{}{
+			"name":     ts.Name,
+			"enabled":  ts.Enabled,
+			"schedule": ts.Schedule,
+			"last_run": ts.LastRun,
+			"next_run": ts.NextRun,
+		}
+		if es, ok := execStatuses[ts.Name]; ok {
+			item["execution"] = map[string]interface{}{
+				"status":     es.Status,
+				"start_time": es.StartTime,
+				"end_time":   es.EndTime,
+				"error":      es.Error,
+			}
+		}
+		result = append(result, item)
+	}
+
+	s.jsonResponse(w, APIResponse{Success: true, Data: result})
 }
 
 func (s *Server) taskToMap(task *config.BackupTask) map[string]interface{} {
@@ -628,7 +674,7 @@ h1{font-size:1.5rem;font-weight:600;margin-bottom:1rem;color:#2563eb}
 .btn.danger{background:#dc2626}
 .btn.danger:hover{background:#b91c1c}
 .btn.small{padding:0.25rem 0.5rem;font-size:0.75rem}
-table{width:100%;border-collapse:collapse}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
 th,td{text-align:left;padding:0.5rem;border-bottom:1px solid #e5e7eb}
 th{color:#666;font-weight:500;font-size:0.75rem;text-transform:uppercase;background:#f9fafb}
 .status{display:inline-block;padding:0.125rem 0.5rem;border-radius:4px;font-size:0.75rem}
@@ -636,12 +682,13 @@ th{color:#666;font-weight:500;font-size:0.75rem;text-transform:uppercase;backgro
 .status.disabled{background:#fee2e2;color:#991b1b}
 .form-group{margin-bottom:0.75rem}
 .form-group label{display:block;font-size:0.75rem;color:#666;margin-bottom:0.25rem}
-.form-group input,.form-group select,.form-group textarea{width:100%;padding:0.5rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;color:#333;font-size:0.875rem}
+.form-group input:not([type=checkbox]):not([type=radio]),.form-group select,.form-group textarea{width:100%;padding:0.5rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;color:#333;font-size:0.875rem}
+.form-group input[type=checkbox],.form-group input[type=radio]{width:auto;margin-right:0.25rem}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:#2563eb}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:0.5rem}
 .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);align-items:center;justify-content:center;z-index:100}
 .modal.show{display:flex}
-.modal-content{background:#fff;padding:1.5rem;border-radius:8px;max-width:500px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.modal-content{background:#fff;padding:1.5rem;border-radius:8px;max-width:650px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)}
 .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}
 .modal-header h3{font-size:1rem;font-weight:500;color:#2563eb}
 .close{background:none;border:none;color:#999;font-size:1.5rem;cursor:pointer}
@@ -723,9 +770,11 @@ th{color:#666;font-weight:500;font-size:0.75rem;text-transform:uppercase;backgro
 </div>
 <form id="task-form">
 <input type="hidden" id="task-original-name">
+<div class="form-row">
 <div class="form-group"><label>名称</label><input type="text" id="task-name" required></div>
 <div class="form-group"><label>启用</label><select id="task-enabled"><option value="true">是</option><option value="false">否</option></select></div>
-<div class="form-group"><label>备份路径（每行一个，文件或目录路径）</label><textarea id="task-paths" style="width:100%;height:80px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;color:#333;padding:0.5rem" placeholder="/path/to/backup&#10;/another/path"></textarea></div>
+</div>
+<div class="form-group"><label>备份路径（每行一个，文件或目录路径）</label><textarea id="task-paths" style="width:100%;height:150px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;color:#333;padding:0.5rem" placeholder="/path/to/backup&#10;/another/path"></textarea></div>
 <div class="form-group"><label>WebDAV 服务器</label><div id="webdav-checkboxes" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:0.5rem;min-height:40px;max-height:120px;overflow-y:auto"></div></div>
 <div class="form-row">
 <div class="form-group"><label>计划类型</label><select id="task-schedule-type" onchange="updateScheduleFields()"><option value="hourly">每小时</option><option value="daily" selected>每天</option><option value="weekly">每周</option></select></div>
@@ -753,7 +802,7 @@ th{color:#666;font-weight:500;font-size:0.75rem;text-transform:uppercase;backgro
 <div class="form-group"><label>名称</label><input type="text" id="webdav-name" required></div>
 <div class="form-group"><label>地址</label><input type="url" id="webdav-url" required placeholder="https://dav.example.com"></div>
 <div class="form-group"><label>用户名</label><input type="text" id="webdav-username"></div>
-<div class="form-group"><label>密码</label><input type="password" id="webdav-password"></div>
+<div class="form-group"><label>密码</label><input type="password" id="webdav-password" placeholder="留空则不修改"></div>
 <div class="form-group"><label>超时时间（秒）</label><input type="number" id="webdav-timeout" value="300"></div>
 <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
 <button type="button" class="btn danger" onclick="closeModal('webdav-modal')">取消</button>
@@ -791,13 +840,13 @@ function editTask(n){api('GET','/api/tasks/'+n).then(r=>{const d=r.data;document
 function renderWebdavCheckboxes(selected){const c=document.getElementById('webdav-checkboxes');c.innerHTML='';if(!window.webdavServers||window.webdavServers.length===0){c.innerHTML='<span style="color:#999;font-size:0.75rem">未配置 WebDAV 服务器。请在 WebDAV 标签页添加。</span>';return}window.webdavServers.forEach(s=>{const chk=document.createElement('label');chk.style.cssText='display:flex;align-items:center;gap:0.25rem;padding:0.25rem;cursor:pointer;font-size:0.875rem';const cb=document.createElement('input');cb.type='checkbox';cb.value=s.name;cb.checked=(selected||[]).includes(s.name);chk.appendChild(cb);chk.appendChild(document.createTextNode(s.name));c.appendChild(chk)})}
 function updateScheduleFields(){const t=document.getElementById('task-schedule-type').value;document.getElementById('day-group').style.display=t==='weekly'?'block':'none';document.getElementById('hour-group').style.display=t==='hourly'?'none':'block'}
 function closeModal(n){document.getElementById(n).classList.remove('show')}
-document.getElementById('task-form').onsubmit=function(e){e.preventDefault();const n=document.getElementById('task-name').value,on=document.getElementById('task-original-name').value,paths=document.getElementById('task-paths').value.split('\n').filter(p=>p.trim()).map(p=>({path:p.trim(),type:''}));const webdavSelected=Array.from(document.querySelectorAll('#webdav-checkboxes input:checked')).map(cb=>cb.value);const d={name:n,enabled:document.getElementById('task-enabled').value==='true',paths:paths,webdav:webdavSelected,schedule:{type:document.getElementById('task-schedule-type').value,hour:parseInt(document.getElementById('task-hour').value),minute:parseInt(document.getElementById('task-minute').value),day:parseInt(document.getElementById('task-day').value)}};(on?api('PUT','/api/tasks/'+on,d):api('POST','/api/tasks',d)).then(r=>{closeModal('task-modal');loadTasks()})};
+document.getElementById('task-form').onsubmit=function(e){e.preventDefault();const n=document.getElementById('task-name').value,on=document.getElementById('task-original-name').value,paths=document.getElementById('task-paths').value.split('\n').filter(p=>p.trim()).map(p=>({path:p.trim()}));const webdavSelected=Array.from(document.querySelectorAll('#webdav-checkboxes input:checked')).map(cb=>cb.value);const d={name:n,enabled:document.getElementById('task-enabled').value==='true',paths:paths,webdav:webdavSelected,schedule:{type:document.getElementById('task-schedule-type').value,hour:parseInt(document.getElementById('task-hour').value),minute:parseInt(document.getElementById('task-minute').value),day:parseInt(document.getElementById('task-day').value)}};(on?api('PUT','/api/tasks/'+on,d):api('POST','/api/tasks',d)).then(r=>{closeModal('task-modal');loadTasks()})};
 document.getElementById('webdav-form').onsubmit=function(e){e.preventDefault();const on=document.getElementById('webdav-original-name').value,d={name:document.getElementById('webdav-name').value,url:document.getElementById('webdav-url').value,username:document.getElementById('webdav-username').value,password:document.getElementById('webdav-password').value,timeout:parseInt(document.getElementById('webdav-timeout').value)};(on?api('PUT','/api/webdav/'+on,d):api('POST','/api/webdav',d)).then(r=>{closeModal('webdav-modal');loadWebdav()})};
 function runTask(n){api('POST','/api/tasks/run/'+n).then(r=>alert(r.message))}
 function deleteTask(n){if(confirm('确定删除任务 '+n+'？'))api('DELETE','/api/tasks/'+n).then(loadTasks)}
 function deleteWebdav(n){if(confirm('确定删除服务器 '+n+'？'))api('DELETE','/api/webdav/'+n).then(loadWebdav)}
 function showWebdavModal(){document.getElementById('webdav-modal-title').textContent='添加 WebDAV 服务器';document.getElementById('webdav-form').reset();document.getElementById('webdav-original-name').value='';document.getElementById('webdav-modal').classList.add('show')}
-function editWebdav(n){api('GET','/api/webdav/'+n).then(r=>{const d=r.data;document.getElementById('webdav-modal-title').textContent='编辑 WebDAV 服务器';document.getElementById('webdav-original-name').value=d.name;document.getElementById('webdav-name').value=d.name;document.getElementById('webdav-url').value=d.url;document.getElementById('webdav-username').value=d.username||'';document.getElementById('webdav-password').value=d.password||'';document.getElementById('webdav-timeout').value=d.timeout||300;document.getElementById('webdav-modal').classList.add('show')})}
+function editWebdav(n){api('GET','/api/webdav/'+n).then(r=>{const d=r.data;document.getElementById('webdav-modal-title').textContent='编辑 WebDAV 服务器';document.getElementById('webdav-original-name').value=d.name;document.getElementById('webdav-name').value=d.name;document.getElementById('webdav-url').value=d.url;document.getElementById('webdav-username').value=d.username||'';document.getElementById('webdav-password').value='';document.getElementById('webdav-timeout').value=d.timeout||300;document.getElementById('webdav-modal').classList.add('show')})}
 function testWebdav(n){api('POST','/api/webdav/test/'+n).then(r=>alert(r.success?'连接成功: '+r.message:'连接失败: '+r.message))}
 connectWS();loadTasks();loadWebdav();
 </script>

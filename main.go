@@ -7,12 +7,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"webdav-backup/backup"
 	"webdav-backup/config"
 	"webdav-backup/logger"
-	"webdav-backup/webdav"
 	"webdav-backup/webserver"
 )
 
@@ -45,19 +43,22 @@ func main() {
 	}
 
 	cfgPath := getConfigPath()
+	logger.Init()
+
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		logger.Error("Failed to load config: %v", err)
 		os.Exit(1)
 	}
 
 	config.SetConfigPath(cfgPath)
-	logger.Init()
 
 	if *listTasks {
 		listAllTasks(cfg)
 		os.Exit(0)
 	}
+
+	executor := backup.NewExecutor(cfg)
 
 	if *runOnce {
 		if *taskName != "" {
@@ -66,12 +67,29 @@ func main() {
 				logger.Error("Task not found: %s", *taskName)
 				os.Exit(1)
 			}
-			runTask(cfg, task)
+			if err := executor.Execute(task); err != nil {
+				logger.Error("[%s] Task failed: %v", task.Name, err)
+				os.Exit(1)
+			}
 		} else {
-			runAllEnabledTasks(cfg)
+			hasError := false
+			for i := range cfg.Tasks {
+				task := &cfg.Tasks[i]
+				if !task.Enabled {
+					logger.Info("[%s] Skipping disabled task", task.Name)
+					continue
+				}
+				if err := executor.Execute(task); err != nil {
+					logger.Error("[%s] Task failed: %v", task.Name, err)
+					hasError = true
+				}
+			}
+			if hasError {
+				os.Exit(1)
+			}
 		}
 	} else {
-		runDaemon(cfg)
+		runDaemon(cfg, executor)
 	}
 }
 
@@ -90,12 +108,10 @@ func listAllTasks(cfg *config.Config) {
 	}
 }
 
-func runDaemon(cfg *config.Config) {
+func runDaemon(cfg *config.Config, executor *backup.Executor) {
 	logger.Info("Starting daemon mode")
 
-	server := webserver.NewServer(cfg, func(task *config.BackupTask) error {
-		return runTaskWithError(cfg, task)
-	})
+	server := webserver.NewServer(cfg, executor.Execute)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -110,116 +126,4 @@ func runDaemon(cfg *config.Config) {
 		logger.Error("Web server error: %v", err)
 		os.Exit(1)
 	}
-}
-
-func runAllEnabledTasks(cfg *config.Config) {
-	hasError := false
-	for i := range cfg.Tasks {
-		task := &cfg.Tasks[i]
-		if !task.Enabled {
-			logger.Info("[%s] Skipping disabled task", task.Name)
-			continue
-		}
-		if err := runTaskWithError(cfg, task); err != nil {
-			logger.Error("[%s] Task failed: %v", task.Name, err)
-			hasError = true
-		}
-	}
-	if hasError {
-		os.Exit(1)
-	}
-}
-
-func runTask(cfg *config.Config, task *config.BackupTask) {
-	if err := runTaskWithError(cfg, task); err != nil {
-		logger.Error("[%s] Task failed: %v", task.Name, err)
-		os.Exit(1)
-	}
-}
-
-func runTaskWithError(cfg *config.Config, task *config.BackupTask) error {
-	logger.Info("[%s] Starting backup task", task.Name)
-
-	if len(task.Paths) == 0 {
-		return fmt.Errorf("no backup paths configured")
-	}
-
-	logger.Info("[%s] Validating paths...", task.Name)
-	var validPaths []config.BackupItem
-	for _, item := range task.Paths {
-		info, err := os.Stat(item.Path)
-		if err != nil {
-			logger.Warn("[%s] Path not accessible, skipping: %s (%v)", task.Name, item.Path, err)
-			continue
-		}
-		validItem := config.BackupItem{Path: item.Path}
-		if item.Type == "" {
-			if info.IsDir() {
-				validItem.Type = "dir"
-			} else {
-				validItem.Type = "file"
-			}
-		} else {
-			validItem.Type = item.Type
-		}
-		validPaths = append(validPaths, validItem)
-		logger.Info("[%s] Path validated: %s (%s)", task.Name, item.Path, validItem.Type)
-	}
-
-	if len(validPaths) == 0 {
-		return fmt.Errorf("no valid backup paths found")
-	}
-
-	task.Paths = validPaths
-
-	timestamp := time.Now().Format("20060102_150405")
-	remotePath := fmt.Sprintf("%s_%s.tar.gz", task.Name, timestamp)
-
-	var uploadErrors []string
-	for _, webdavName := range task.WebDAV {
-		wdCfg := cfg.GetWebDAVByName(webdavName)
-		if wdCfg == nil {
-			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: not found in config", webdavName))
-			continue
-		}
-
-		client := webdav.NewClient(webdav.Config{
-			Name:     wdCfg.Name,
-			URL:      wdCfg.URL,
-			Username: wdCfg.Username,
-			Password: wdCfg.Password,
-			Timeout:  wdCfg.Timeout,
-		})
-
-		logger.Info("[%s] Testing connection to WebDAV server: %s", task.Name, wdCfg.Name)
-		if err := client.TestConnection(); err != nil {
-			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: connection failed: %v", wdCfg.Name, err))
-			continue
-		}
-
-		backupSvc := backup.New()
-		stream, err := backupSvc.CreateStream(task)
-		if err != nil {
-			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: failed to create stream: %v", wdCfg.Name, err))
-			continue
-		}
-
-		logger.Info("[%s] Uploading to %s as %s", task.Name, wdCfg.Name, remotePath)
-
-		if err := client.UploadStream(stream, -1, remotePath); err != nil {
-			stream.Close()
-			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: upload failed: %v", wdCfg.Name, err))
-			continue
-		}
-		stream.Close()
-
-		logger.Info("[%s] Backup uploaded successfully to %s", task.Name, wdCfg.Name)
-	}
-
-	if len(uploadErrors) > 0 {
-		return fmt.Errorf("upload errors: %v", uploadErrors)
-	}
-
-	logger.Info("[%s] Backup task completed successfully", task.Name)
-	return nil
 }

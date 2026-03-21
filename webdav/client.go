@@ -83,48 +83,45 @@ func (c *Client) UploadStream(reader io.Reader, size int64, remotePath string) e
 
 	logger.Info("[%s] Starting upload: %s (%.2f MB)", c.Name, remotePath, float64(size)/1024/1024)
 
-	var lastErr error
-	for retry := 0; retry < 3; retry++ {
-		if retry > 0 {
-			logger.Warn("[%s] Retry %d/3 for %s", c.Name, retry, remotePath)
-			time.Sleep(time.Duration(retry) * time.Second)
-		}
-
-		pr := &progressReader{
-			reader: reader,
-			total:  size,
-			name:   c.Name,
-		}
-
-		req, err := http.NewRequest("PUT", remoteURL, pr)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to create request: %w", err)
-			continue
-		}
-
-		req.SetBasicAuth(c.Username, c.Password)
-		req.ContentLength = size
-
-		resp, err := c.client.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("request failed: %w", err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			logger.Info("[%s] Upload completed: %s", c.Name, remotePath)
-			return nil
-		}
-
-		body, _ := io.ReadAll(resp.Body)
-		lastErr = fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(body))
+	pr := &progressReader{
+		reader: reader,
+		total:  size,
+		name:   c.Name,
 	}
 
-	return lastErr
+	req, err := http.NewRequest("PUT", remoteURL, pr)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.SetBasicAuth(c.Username, c.Password)
+	req.ContentLength = -1
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		logger.Info("[%s] Upload completed: %s", c.Name, remotePath)
+		return nil
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(body))
 }
 
 func (c *Client) TestConnection() error {
+	testClient := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: false,
+			},
+		},
+	}
+
 	req, err := http.NewRequest("PROPFIND", c.URL, bytes.NewReader([]byte{}))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -133,18 +130,29 @@ func (c *Client) TestConnection() error {
 	req.SetBasicAuth(c.Username, c.Password)
 	req.Header.Set("Depth", "0")
 
-	resp, err := c.client.Do(req)
+	resp, err := testClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("connection failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusUnauthorized {
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
 		return fmt.Errorf("authentication failed")
+	case http.StatusNotFound:
+		return fmt.Errorf("path not found")
+	case http.StatusForbidden:
+		return fmt.Errorf("access forbidden")
+	case http.StatusMethodNotAllowed:
+		return fmt.Errorf("not a WebDAV endpoint")
 	}
 
 	if resp.StatusCode >= 500 {
 		return fmt.Errorf("server error: %d", resp.StatusCode)
+	}
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("client error: %d", resp.StatusCode)
 	}
 
 	return nil

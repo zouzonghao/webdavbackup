@@ -14,11 +14,32 @@ import (
 
 type Backup struct{}
 
+type StreamResult struct {
+	Stream    io.ReadCloser
+	TotalSize int64
+	FileCount int
+}
+
 func New() *Backup {
 	return &Backup{}
 }
 
-func (b *Backup) CreateStream(task *config.BackupTask) (io.ReadCloser, error) {
+func (b *Backup) CreateStream(task *config.BackupTask) (*StreamResult, error) {
+	var totalSize int64
+	var totalFiles int
+
+	for _, item := range task.Paths {
+		filepath.Walk(item.Path, func(_ string, info os.FileInfo, _ error) error {
+			if !info.IsDir() {
+				totalSize += info.Size()
+				totalFiles++
+			}
+			return nil
+		})
+	}
+
+	logger.Info("[%s] Found %d files, total size: %.2f MB", task.Name, totalFiles, float64(totalSize)/1024/1024)
+
 	pr, pw := io.Pipe()
 
 	go func() {
@@ -30,21 +51,9 @@ func (b *Backup) CreateStream(task *config.BackupTask) (io.ReadCloser, error) {
 		tarWriter := tar.NewWriter(gzWriter)
 		defer tarWriter.Close()
 
-		totalFiles := 0
-		for _, item := range task.Paths {
-			filepath.Walk(item.Path, func(_ string, info os.FileInfo, _ error) error {
-				if !info.IsDir() {
-					totalFiles++
-				}
-				return nil
-			})
-		}
-
-		logger.Info("[%s] Found %d files to backup", task.Name, totalFiles)
-
 		processed := 0
 		for _, item := range task.Paths {
-			if err := b.addToTar(tarWriter, item.Path, item.Type, &processed, totalFiles, task.Name); err != nil {
+			if err := b.addToTar(tarWriter, item.Path, &processed, totalFiles, task.Name); err != nil {
 				logger.Warn("[%s] Failed to add %s: %v", task.Name, item.Path, err)
 			}
 		}
@@ -52,24 +61,20 @@ func (b *Backup) CreateStream(task *config.BackupTask) (io.ReadCloser, error) {
 		logger.Info("[%s] Archive complete: %d files", task.Name, processed)
 	}()
 
-	return pr, nil
+	return &StreamResult{
+		Stream:    pr,
+		TotalSize: totalSize,
+		FileCount: totalFiles,
+	}, nil
 }
 
-func (b *Backup) addToTar(tarWriter *tar.Writer, path string, itemType string, processed *int, total int, taskName string) error {
+func (b *Backup) addToTar(tarWriter *tar.Writer, path string, processed *int, total int, taskName string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("cannot access %s: %w", path, err)
 	}
 
-	if itemType == "" {
-		if info.IsDir() {
-			itemType = "dir"
-		} else {
-			itemType = "file"
-		}
-	}
-
-	if itemType == "dir" || info.IsDir() {
+	if info.IsDir() {
 		return b.addDirToTar(tarWriter, path, processed, total, taskName)
 	}
 
@@ -101,9 +106,9 @@ func (b *Backup) addDirToTar(tarWriter *tar.Writer, dirPath string, processed *i
 		if err != nil {
 			return err
 		}
-		defer file.Close()
 
 		_, err = io.Copy(tarWriter, file)
+		file.Close()
 		if err == nil {
 			*processed++
 			if *processed%100 == 0 || *processed == total {
@@ -135,9 +140,9 @@ func (b *Backup) addFileToTar(tarWriter *tar.Writer, filePath string, processed 
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
 	_, err = io.Copy(tarWriter, file)
+	file.Close()
 	if err == nil {
 		*processed++
 		if total > 0 {
