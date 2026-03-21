@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -24,11 +23,10 @@ type BackupItem struct {
 }
 
 type ScheduleConfig struct {
-	Type     string `yaml:"type" json:"type"`
-	Day      int    `yaml:"day" json:"day"`
-	Hour     int    `yaml:"hour" json:"hour"`
-	Minute   int    `yaml:"minute" json:"minute"`
-	CronExpr string `yaml:"cron_expr" json:"cron_expr"`
+	Type   string `yaml:"type" json:"type"`
+	Day    int    `yaml:"day" json:"day"`
+	Hour   int    `yaml:"hour" json:"hour"`
+	Minute int    `yaml:"minute" json:"minute"`
 }
 
 type BackupTask struct {
@@ -47,13 +45,9 @@ type WebServerConfig struct {
 }
 
 type Config struct {
-	WebDAV     []WebDAVConfig `yaml:"webdav" json:"webdav"`
-	Encryption struct {
-		Password string `yaml:"password" json:"password"`
-	} `yaml:"encryption" json:"encryption"`
+	WebDAV    []WebDAVConfig  `yaml:"webdav" json:"webdav"`
 	Tasks     []BackupTask    `yaml:"tasks" json:"tasks"`
 	WebServer WebServerConfig `yaml:"webserver" json:"webserver"`
-	TempDir   string          `yaml:"temp_dir" json:"temp_dir"`
 }
 
 var (
@@ -100,19 +94,13 @@ func Load(path string) (*Config, error) {
 func defaultConfig() *Config {
 	return &Config{
 		WebDAV: []WebDAVConfig{},
-		Encryption: struct {
-			Password string `yaml:"password" json:"password"`
-		}{
-			Password: "",
-		},
-		Tasks: []BackupTask{},
+		Tasks:  []BackupTask{},
 		WebServer: WebServerConfig{
 			Enabled:  true,
 			Port:     8080,
 			Username: "admin",
 			Password: "admin",
 		},
-		TempDir: "/tmp/webdav-backup",
 	}
 }
 
@@ -122,20 +110,9 @@ func createConfigDir(path string) error {
 }
 
 func applyDefaults(cfg *Config) {
-	if cfg.TempDir == "" {
-		cfg.TempDir = "/tmp/webdav-backup"
-	}
-
 	for i := range cfg.WebDAV {
 		if cfg.WebDAV[i].Timeout == 0 {
 			cfg.WebDAV[i].Timeout = 300
-		}
-	}
-
-	for i := range cfg.Tasks {
-		if cfg.Tasks[i].Schedule.Hour == 0 && cfg.Tasks[i].Schedule.Minute == 0 && cfg.Tasks[i].Schedule.Type != "" {
-			cfg.Tasks[i].Schedule.Hour = 0
-			cfg.Tasks[i].Schedule.Minute = 0
 		}
 	}
 
@@ -161,13 +138,6 @@ func Save(path string, cfg *Config) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
-}
-
-func Reload() (*Config, error) {
-	if configPath == "" {
-		return nil, fmt.Errorf("config path not set")
-	}
-	return Load(configPath)
 }
 
 func (c *Config) GetWebDAVByName(name string) *WebDAVConfig {
@@ -220,28 +190,7 @@ func (c *Config) DeleteWebDAV(name string) {
 	}
 }
 
-func (s *ScheduleConfig) ToCronExpr() string {
-	if s.CronExpr != "" {
-		return s.CronExpr
-	}
-
-	switch s.Type {
-	case "hourly":
-		return fmt.Sprintf("%d * * * *", s.Minute)
-	case "daily":
-		return fmt.Sprintf("%d %d * * *", s.Minute, s.Hour)
-	case "weekly":
-		return fmt.Sprintf("%d %d * * %d", s.Minute, s.Hour, s.Day)
-	default:
-		return fmt.Sprintf("%d %d * * *", s.Minute, s.Hour)
-	}
-}
-
 func (s *ScheduleConfig) String() string {
-	if s.CronExpr != "" {
-		return fmt.Sprintf("Custom: %s", s.CronExpr)
-	}
-
 	switch s.Type {
 	case "hourly":
 		return fmt.Sprintf("Hourly at minute %d", s.Minute)
@@ -256,47 +205,5 @@ func (s *ScheduleConfig) String() string {
 		return fmt.Sprintf("Weekly on %s at %02d:%02d", dayName, s.Hour, s.Minute)
 	default:
 		return "Unknown schedule"
-	}
-}
-
-func ParseScheduleType(input string) (string, int, int, int) {
-	switch strings.ToLower(input) {
-	case "hourly", "1":
-		return "hourly", 0, 0, 0
-	case "daily", "2":
-		return "daily", 0, 0, 0
-	case "weekly", "3":
-		return "weekly", 1, 0, 0
-	default:
-		return "daily", 0, 0, 0
-	}
-}
-
-func GetDefaultSchedule(scheduleType string) ScheduleConfig {
-	switch scheduleType {
-	case "hourly":
-		return ScheduleConfig{
-			Type:   "hourly",
-			Minute: 0,
-		}
-	case "daily":
-		return ScheduleConfig{
-			Type:   "daily",
-			Hour:   0,
-			Minute: 0,
-		}
-	case "weekly":
-		return ScheduleConfig{
-			Type:   "weekly",
-			Day:    1,
-			Hour:   0,
-			Minute: 0,
-		}
-	default:
-		return ScheduleConfig{
-			Type:   "daily",
-			Hour:   0,
-			Minute: 0,
-		}
 	}
 }

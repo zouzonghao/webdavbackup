@@ -144,7 +144,7 @@ func runTaskWithError(cfg *config.Config, task *config.BackupTask) error {
 		return fmt.Errorf("no backup paths configured")
 	}
 
-	logger.Info("[%s] Pre-flight check: validating paths", task.Name)
+	logger.Info("[%s] Validating paths...", task.Name)
 	var validPaths []config.BackupItem
 	for _, item := range task.Paths {
 		info, err := os.Stat(item.Path)
@@ -172,21 +172,8 @@ func runTaskWithError(cfg *config.Config, task *config.BackupTask) error {
 
 	task.Paths = validPaths
 
-	backupSvc := backup.New(cfg.TempDir)
-
-	backupFile, err := backupSvc.CreateTask(task, cfg.Encryption.Password)
-	if err != nil {
-		return fmt.Errorf("failed to create backup: %w", err)
-	}
-
-	defer func() {
-		logger.Info("[%s] Cleaning up temp file: %s", task.Name, backupFile)
-		if err := os.Remove(backupFile); err != nil {
-			logger.Warn("[%s] Failed to remove temp file: %v", task.Name, err)
-		}
-	}()
-
-	timestamp := time.Now().Format("20060102_150405.000")
+	timestamp := time.Now().Format("20060102_150405")
+	remotePath := fmt.Sprintf("%s_%s.tar.gz", task.Name, timestamp)
 
 	var uploadErrors []string
 	for _, webdavName := range task.WebDAV {
@@ -210,15 +197,21 @@ func runTaskWithError(cfg *config.Config, task *config.BackupTask) error {
 			continue
 		}
 
-		remotePath := fmt.Sprintf("%s_%s.tar.gz.enc", task.Name, timestamp)
-		remotePath = filepath.Base(remotePath)
+		backupSvc := backup.New()
+		stream, err := backupSvc.CreateStream(task)
+		if err != nil {
+			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: failed to create stream: %v", wdCfg.Name, err))
+			continue
+		}
 
 		logger.Info("[%s] Uploading to %s as %s", task.Name, wdCfg.Name, remotePath)
 
-		if err := client.Upload(backupFile, remotePath); err != nil {
+		if err := client.UploadStream(stream, -1, remotePath); err != nil {
+			stream.Close()
 			uploadErrors = append(uploadErrors, fmt.Sprintf("%s: upload failed: %v", wdCfg.Name, err))
 			continue
 		}
+		stream.Close()
 
 		logger.Info("[%s] Backup uploaded successfully to %s", task.Name, wdCfg.Name)
 	}

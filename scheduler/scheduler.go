@@ -20,7 +20,6 @@ type Scheduler struct {
 
 type scheduledTask struct {
 	task     *config.BackupTask
-	ticker   *time.Ticker
 	stopChan chan struct{}
 	lastRun  time.Time
 	nextRun  time.Time
@@ -63,9 +62,6 @@ func (s *Scheduler) Stop() {
 
 	for name, st := range s.tasks {
 		close(st.stopChan)
-		if st.ticker != nil {
-			st.ticker.Stop()
-		}
 		delete(s.tasks, name)
 	}
 
@@ -129,9 +125,6 @@ func (s *Scheduler) AddTask(task *config.BackupTask) {
 
 	if st, exists := s.tasks[task.Name]; exists {
 		close(st.stopChan)
-		if st.ticker != nil {
-			st.ticker.Stop()
-		}
 		delete(s.tasks, task.Name)
 	}
 
@@ -146,9 +139,6 @@ func (s *Scheduler) RemoveTask(name string) {
 
 	if st, exists := s.tasks[name]; exists {
 		close(st.stopChan)
-		if st.ticker != nil {
-			st.ticker.Stop()
-		}
 		delete(s.tasks, name)
 		logger.Info("[%s] Task removed from scheduler", name)
 	}
