@@ -1,0 +1,60 @@
+webdav:
+  - name: primary
+    url: https://dav.example.com
+    username: your-username
+    password: your-password
+    timeout: 300
+  - name: secondary
+    url: https://backup.example.com/webdav
+    username: backup-user
+    password: backup-password
+    timeout: 300
+
+encryption:
+  password: your-strong-encryption-password
+
+webserver:
+  enabled: true
+  port: 8080
+  username: admin
+  password: admin123
+
+tasks:
+  - name: app-config
+    enabled: true
+    paths:
+      - path: /opt/app
+      - path: /etc/init.d/app
+      - path: /home/app/config.yaml
+    webdav:
+      - primary
+      - secondary
+    schedule:
+      type: daily
+      hour: 0
+      minute: 0
+
+  - name: database-backup
+    enabled: true
+    paths:
+      - path: /var/lib/mysql
+      - path: /etc/mysql/my.cnf
+    webdav:
+      - primary
+    schedule:
+      type: weekly
+      day: 1
+      hour: 2
+      minute: 30
+
+  - name: logs-archive
+    enabled: false
+    paths:
+      - path: /var/log/app
+    webdav:
+      - secondary
+    schedule:
+      type: hourly
+      minute: 0
+
+temp_dir: /tmp/webdav-backup
