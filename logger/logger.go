@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// Logger 统一的日志记录器
 type Logger struct {
 	mu       sync.Mutex
 	callback func(level, msg string)
@@ -14,10 +15,12 @@ type Logger struct {
 
 var defaultLogger *Logger
 
+// Init 初始化默认日志记录器
 func Init() {
 	defaultLogger = &Logger{}
 }
 
+// SetLogCallback 设置日志回调函数，用于 WebSocket 广播等场景
 func SetLogCallback(cb func(level, msg string)) {
 	if defaultLogger != nil {
 		defaultLogger.mu.Lock()
@@ -56,6 +59,7 @@ func (l *Logger) Debug(format string, args ...interface{}) {
 	l.log("DEBUG", format, args...)
 }
 
+// Info 记录 INFO 级别日志
 func Info(format string, args ...interface{}) {
 	if defaultLogger != nil {
 		defaultLogger.Info(format, args...)
@@ -64,6 +68,7 @@ func Info(format string, args ...interface{}) {
 	}
 }
 
+// Error 记录 ERROR 级别日志
 func Error(format string, args ...interface{}) {
 	if defaultLogger != nil {
 		defaultLogger.Error(format, args...)
@@ -72,6 +77,7 @@ func Error(format string, args ...interface{}) {
 	}
 }
 
+// Warn 记录 WARN 级别日志
 func Warn(format string, args ...interface{}) {
 	if defaultLogger != nil {
 		defaultLogger.Warn(format, args...)
@@ -80,6 +86,7 @@ func Warn(format string, args ...interface{}) {
 	}
 }
 
+// Debug 记录 DEBUG 级别日志
 func Debug(format string, args ...interface{}) {
 	if defaultLogger != nil {
 		defaultLogger.Debug(format, args...)

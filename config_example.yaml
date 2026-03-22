@@ -1,0 +1,181 @@
+# =========================================================
+# WebDAV Backup 综合配置示例
+# 支持本地备份和NodeImage图床同步两种功能
+# =========================================================
+
+# ========== WebDAV 服务器配置 ==========
+webdav:
+  # 示例1: 坚果云 WebDAV
+  - name: jianguoyun
+    url: https://dav.jianguoyun.com/dav
+    username: your_email@example.com
+    password: your_app_password
+    timeout: 300
+  
+  # 示例2: 本地 WebDAV 服务器
+  - name: local
+    url: http://192.168.1.100:8080/webdav/
+    username: admin
+    password: admin123
+    timeout: 300
+  
+  # 示例3: Nextcloud WebDAV
+  - name: nextcloud
+    url: https://cloud.example.com/remote.php/dav/files/username/
+    username: username
+    password: your_password
+    timeout: 300
+
+# ========== 本地备份任务配置 ==========
+local_tasks:
+  # 示例1: 每日重要文档备份
+  - name: daily-documents
+    type: local
+    enabled: true
+    paths:
+      - path: /home/user/documents
+      - path: /home/user/photos
+    webdav:
+      - jianguoyun
+      - local
+    schedule:
+      type: daily
+      day: 1
+      hour: 2
+      minute: 0
+    encrypt_pwd: "strong-password-for-encryption"
+    base_path: ""  # 可选，WebDAV上的存储路径
+  
+  # 示例2: 每小时配置文件备份
+  - name: config-backup
+    type: local
+    enabled: true
+    paths:
+      - path: /etc/nginx/nginx.conf
+      - path: /etc/mysql/my.cnf
+    webdav:
+      - local
+    schedule:
+      type: hourly
+      day: 1
+      hour: 0
+      minute: 30
+    encrypt_pwd: ""
+    base_path: "configs"
+  
+  # 示例3: 每周系统全备份（禁用状态）
+  - name: weekly-full-backup
+    type: local
+    enabled: false
+    paths:
+      - path: /home
+      - path: /etc
+    webdav:
+      - nextcloud
+    schedule:
+      type: weekly
+      day: 0      # 0=周日, 1=周一, ..., 6=周六
+      hour: 3
+      minute: 0
+    encrypt_pwd: "weekly-encryption-key"
+    base_path: "weekly-backups"
+
+# ========== NodeImage同步任务配置 ==========
+nodeimage_tasks:
+  # 示例1: 增量同步（使用API Key）
+  - name: nodeimage-incremental
+    type: nodeimage
+    enabled: true
+    sync_mode: incremental  # incremental 或 full
+    nodeimage:
+      api_key: "your-nodeimage-api-key-here"
+      cookie: ""
+      api_url: "https://api.nodeimage.com/api/images"
+      base_path: "/nodeimage"
+    webdav:
+      - jianguoyun
+    schedule:
+      type: daily
+      day: 1
+      hour: 4
+      minute: 0
+    concurrency: 5
+  
+  # 示例2: 全量同步（使用Cookie）
+  - name: nodeimage-full
+    type: nodeimage
+    enabled: false
+    sync_mode: full
+    nodeimage:
+      api_key: ""
+      cookie: "your-nodeimage-cookie-here"
+      api_url: "https://api.nodeimage.com/api/images"
+      base_path: "/nodeimage/full"
+    webdav:
+      - local
+      - nextcloud
+    schedule:
+      type: weekly
+      day: 6      # 周六
+      hour: 5
+      minute: 0
+    concurrency: 3
+
+# ========== Web管理界面配置 ==========
+webserver:
+  host: 0.0.0.0
+  port: 8080
+  username: admin
+  password: admin123
+
+# ========== NodeImage全局默认配置 ==========
+nodeimage_defaults:
+  api_url: "https://api.nodeimage.com/api/images"
+  concurrency: 5
+
+# =========================================================
+# 配置说明：
+# 
+# 1. WebDAV配置：
+#    - name: 服务器名称，在任务中引用
+#    - url: WebDAV服务器地址
+#    - username/password: 认证信息
+#    - timeout: 超时时间（秒），默认300
+# 
+# 2. 本地备份任务：
+#    - name: 任务名称（唯一）
+#    - type: 固定为 "local"
+#    - enabled: 是否启用
+#    - paths: 备份路径列表
+#    - webdav: 目标WebDAV服务器名称列表
+#    - schedule: 调度配置
+#    - encrypt_pwd: ZIP加密密码（空字符串表示不加密）
+#    - base_path: WebDAV上的存储路径（可选）
+# 
+# 3. NodeImage同步任务：
+#    - name: 任务名称（唯一）
+#    - type: 固定为 "nodeimage"
+#    - enabled: 是否启用
+#    - sync_mode: 同步模式
+#      - incremental: 增量同步，使用API Key，只同步最近图片
+#      - full: 全量同步，使用Cookie，同步所有图片并删除多余文件
+#    - nodeimage: NodeImage配置
+#      - api_key: API Key（增量同步必需）
+#      - cookie: Cookie（全量同步必需）
+#      - api_url: NodeImage API地址
+#      - base_path: WebDAV上的存储路径
+#    - webdav: 目标WebDAV服务器名称列表
+#    - schedule: 调度配置
+#    - concurrency: 并发数（默认5）
+# 
+# 4. 调度配置说明：
+#    - type: hourly/daily/weekly
+#    - day: 0=周日, 1=周一, ..., 6=周六（weekly时使用）
+#    - hour: 小时（0-23）
+#    - minute: 分钟（0-59）
+# 
+# 5. 加密说明：
+#    - 使用AES-256加密的ZIP格式
+#    - Windows用户可用7-Zip直接解压
+#    - Linux/macOS用户可使用7z命令
+# =========================================================

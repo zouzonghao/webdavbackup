@@ -1,18 +1,24 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
-	"webdav-backup/backup"
 	"webdav-backup/config"
+	"webdav-backup/engine"
 	"webdav-backup/logger"
+	"webdav-backup/scheduler"
 	"webdav-backup/webserver"
 )
+
+//go:embed public/*
+var staticFiles embed.FS
 
 var (
 	configPath  = flag.String("config", "", "Path to config file (default: ./config.yaml)")
@@ -32,6 +38,14 @@ func getConfigPath() string {
 		return "config.yaml"
 	}
 	return filepath.Join(wd, "config.yaml")
+}
+
+func getStaticFS() fs.FS {
+	sub, err := fs.Sub(staticFiles, "public")
+	if err != nil {
+		return nil
+	}
+	return sub
 }
 
 func main() {
@@ -58,7 +72,11 @@ func main() {
 		os.Exit(0)
 	}
 
-	executor := backup.NewExecutor(cfg)
+	executor := engine.NewExecutor(cfg)
+
+	taskFunc := func(task interface{}) error {
+		return executor.ExecuteTask(task)
+	}
 
 	if *runOnce {
 		if *taskName != "" {
@@ -67,20 +85,31 @@ func main() {
 				logger.Error("Task not found: %s", *taskName)
 				os.Exit(1)
 			}
-			if err := executor.Execute(task); err != nil {
-				logger.Error("[%s] Task failed: %v", task.Name, err)
+			if err := executor.ExecuteTask(task); err != nil {
+				logger.Error("Task execution failed: %v", err)
 				os.Exit(1)
 			}
 		} else {
 			hasError := false
-			for i := range cfg.Tasks {
-				task := &cfg.Tasks[i]
+			for i := range cfg.LocalTasks {
+				task := &cfg.LocalTasks[i]
 				if !task.Enabled {
-					logger.Info("[%s] Skipping disabled task", task.Name)
+					logger.Info("[本地备份] Skipping disabled task: %s", task.Name)
 					continue
 				}
-				if err := executor.Execute(task); err != nil {
-					logger.Error("[%s] Task failed: %v", task.Name, err)
+				if err := executor.ExecuteTask(task); err != nil {
+					logger.Error("[本地备份] Task '%s' failed: %v", task.Name, err)
+					hasError = true
+				}
+			}
+			for i := range cfg.NodeImageTasks {
+				task := &cfg.NodeImageTasks[i]
+				if !task.Enabled {
+					logger.Info("[NodeImage] Skipping disabled task: %s", task.Name)
+					continue
+				}
+				if err := executor.ExecuteTask(task); err != nil {
+					logger.Error("[NodeImage] Task '%s' failed: %v", task.Name, err)
 					hasError = true
 				}
 			}
@@ -89,29 +118,45 @@ func main() {
 			}
 		}
 	} else {
-		runDaemon(cfg, executor)
+		runDaemon(cfg, taskFunc)
 	}
 }
 
 func listAllTasks(cfg *config.Config) {
 	fmt.Println("Backup Tasks:")
 	fmt.Println("==========================================")
-	for _, task := range cfg.Tasks {
+
+	fmt.Println("本地备份任务:")
+	for _, task := range cfg.LocalTasks {
 		status := "disabled"
 		if task.Enabled {
 			status = "enabled"
 		}
 		fmt.Printf("  [%s] %s (%s)\n", status, task.Name, task.Schedule.String())
+		fmt.Printf("    类型: 本地备份\n")
 		fmt.Printf("    Paths: %d items\n", len(task.Paths))
 		fmt.Printf("    WebDAV: %v\n", task.WebDAV)
 		fmt.Println()
 	}
+
+	fmt.Println("NodeImage同步任务:")
+	for _, task := range cfg.NodeImageTasks {
+		status := "disabled"
+		if task.Enabled {
+			status = "enabled"
+		}
+		fmt.Printf("  [%s] %s (%s)\n", status, task.Name, task.Schedule.String())
+		fmt.Printf("    类型: NodeImage同步\n")
+		fmt.Printf("    WebDAV: %v\n", task.WebDAV)
+		fmt.Printf("    并发数: %d\n", task.Concurrency)
+		fmt.Println()
+	}
 }
 
-func runDaemon(cfg *config.Config, executor *backup.Executor) {
+func runDaemon(cfg *config.Config, taskFunc scheduler.TaskFunc) {
 	logger.Info("Starting daemon mode")
 
-	server := webserver.NewServer(cfg, executor.Execute)
+	server := webserver.NewServer(cfg, taskFunc, getStaticFS())
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

@@ -1,16 +1,18 @@
-# WebDAV Backup
+# WebDAV Backup Pro
 
-一个轻量级的备份工具，支持将指定目录/文件打包后流式上传到 WebDAV 服务器。
+一个综合性的备份和同步工具，支持本地文件备份和NodeImage图床同步两种功能，将所有数据流式上传到WebDAV服务器。
 
 ## 设计理念
 
 本工具的设计原则是**专注、简单、职责单一**：
 
+- **双模式备份**：既支持本地文件备份，也支持NodeImage图床同步
 - **只管备份，不管存储**：备份文件上传到 WebDAV 后，存储空间管理、旧备份清理由用户自行处理
 - **只管上传，不管恢复**：恢复操作通过手动下载备份文件解压即可，无需工具支持
-- **日志即通知**：所有执行结果输出到 stdout，通过 systemd/docker 等服务管理器持久化，配合 WebUI 实时查看
+- **实时日志推送**：通过WebSocket实时推送日志到Web界面，支持两种任务的实时监控
 - **内存监控**：任务完成后输出峰值内存使用情况，便于监控资源消耗
 - **明文配置**：配置文件中的密码明文存储，由用户自行保障配置文件安全
+- **分离配置**：本地备份和NodeImage同步任务分开配置，逻辑清晰
 
 ## 功能边界
 
@@ -41,13 +43,24 @@
 
 ```
 webdav-backup/
-├── config/config.go       # 配置管理（YAML 格式）
-├── logger/logger.go       # 日志模块（输出到 stdout）
-├── backup/backup.go       # 备份模块（ZIP 流式打包）
-├── webdav/client.go       # WebDAV 客户端
-├── scheduler/scheduler.go # 内置定时任务调度器
-├── webserver/server.go    # Web 服务器 + 内嵌管理界面
-└── main.go                # 主程序入口
+├── config/config.go              # 配置管理（YAML 格式，支持两种任务类型）
+├── logger/logger.go              # 日志模块（输出到 stdout）
+├── logger/ws_logger.go           # WebSocket 增强日志模块
+├── backup/backup.go              # 本地备份模块（ZIP 流式打包）
+├── backup/executor_legacy.go     # 向后兼容的执行器
+├── engine/executor.go            # 统一执行引擎（支持两种任务类型）
+├── nodeimage/client.go           # NodeImage API 客户端（增量/全量同步）
+├── webdav/client.go              # WebDAV 客户端（向后兼容）
+├── webdav/client_enhanced.go     # 增强版WebDAV客户端（完整功能）
+├── websocket/hub.go              # WebSocket 连接管理
+├── scheduler/scheduler.go        # 内置定时任务调度器
+├── webserver/server.go           # Web 服务器 + 内嵌管理界面
+├── public/                       # 前端静态文件
+│   ├── index.html               # 综合性管理界面
+│   ├── login.html               # 登录页面
+│   ├── style.css                # Solarized 米色调主题样式
+│   └── script.js                # 前端交互脚本
+└── main.go                      # 主程序入口
 ```
 
 ### 核心组件

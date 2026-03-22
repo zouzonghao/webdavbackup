@@ -17,24 +17,11 @@ type WebDAVConfig struct {
 	Timeout  int    `yaml:"timeout" json:"timeout"`
 }
 
-type BackupItem struct {
-	Path string `yaml:"path" json:"path"`
-}
-
 type ScheduleConfig struct {
 	Type   string `yaml:"type" json:"type"`
 	Day    int    `yaml:"day" json:"day"`
 	Hour   int    `yaml:"hour" json:"hour"`
 	Minute int    `yaml:"minute" json:"minute"`
-}
-
-type BackupTask struct {
-	Name       string         `yaml:"name" json:"name"`
-	Enabled    bool           `yaml:"enabled" json:"enabled"`
-	Paths      []BackupItem   `yaml:"paths" json:"paths"`
-	WebDAV     []string       `yaml:"webdav" json:"webdav"`
-	Schedule   ScheduleConfig `yaml:"schedule" json:"schedule"`
-	EncryptPwd string         `yaml:"encrypt_pwd" json:"encrypt_pwd"`
 }
 
 type WebServerConfig struct {
@@ -44,10 +31,44 @@ type WebServerConfig struct {
 	Password string `yaml:"password" json:"password"`
 }
 
+type BackupItem struct {
+	Path string `yaml:"path" json:"path"`
+}
+
+type LocalBackupTask struct {
+	Name       string         `yaml:"name" json:"name"`
+	Type       string         `yaml:"type" json:"type"`
+	Enabled    bool           `yaml:"enabled" json:"enabled"`
+	Paths      []BackupItem   `yaml:"paths" json:"paths"`
+	WebDAV     []string       `yaml:"webdav" json:"webdav"`
+	Schedule   ScheduleConfig `yaml:"schedule" json:"schedule"`
+	EncryptPwd string         `yaml:"encrypt_pwd" json:"encrypt_pwd"`
+	BasePath   string         `yaml:"base_path" json:"base_path"`
+}
+
+type NodeImageSyncTask struct {
+	Name        string          `yaml:"name" json:"name"`
+	Type        string          `yaml:"type" json:"type"`
+	Enabled     bool            `yaml:"enabled" json:"enabled"`
+	SyncMode    string          `yaml:"sync_mode" json:"sync_mode"`
+	NodeImage   NodeImageConfig `yaml:"nodeimage" json:"nodeimage"`
+	WebDAV      []string        `yaml:"webdav" json:"webdav"`
+	Schedule    ScheduleConfig  `yaml:"schedule" json:"schedule"`
+	Concurrency int             `yaml:"concurrency" json:"concurrency"`
+}
+
+type NodeImageConfig struct {
+	APIKey   string `yaml:"api_key" json:"api_key"`
+	Cookie   string `yaml:"cookie" json:"cookie"`
+	APIURL   string `yaml:"api_url" json:"api_url"`
+	BasePath string `yaml:"base_path" json:"base_path"`
+}
+
 type Config struct {
-	WebDAV    []WebDAVConfig  `yaml:"webdav" json:"webdav"`
-	Tasks     []BackupTask    `yaml:"tasks" json:"tasks"`
-	WebServer WebServerConfig `yaml:"webserver" json:"webserver"`
+	WebDAV         []WebDAVConfig      `yaml:"webdav" json:"webdav"`
+	LocalTasks     []LocalBackupTask   `yaml:"local_tasks" json:"local_tasks"`
+	NodeImageTasks []NodeImageSyncTask `yaml:"nodeimage_tasks" json:"nodeimage_tasks"`
+	WebServer      WebServerConfig     `yaml:"webserver" json:"webserver"`
 }
 
 var (
@@ -93,8 +114,9 @@ func Load(path string) (*Config, error) {
 
 func defaultConfig() *Config {
 	return &Config{
-		WebDAV: []WebDAVConfig{},
-		Tasks:  []BackupTask{},
+		WebDAV:         []WebDAVConfig{},
+		LocalTasks:     []LocalBackupTask{},
+		NodeImageTasks: []NodeImageSyncTask{},
 		WebServer: WebServerConfig{
 			Host:     "0.0.0.0",
 			Port:     8080,
@@ -148,30 +170,69 @@ func (c *Config) GetWebDAVByName(name string) *WebDAVConfig {
 	return nil
 }
 
-func (c *Config) GetTaskByName(name string) *BackupTask {
-	for i := range c.Tasks {
-		if c.Tasks[i].Name == name {
-			result := c.Tasks[i]
+func (c *Config) GetLocalTaskByName(name string) *LocalBackupTask {
+	for i := range c.LocalTasks {
+		if c.LocalTasks[i].Name == name {
+			result := c.LocalTasks[i]
 			return &result
 		}
 	}
 	return nil
 }
 
-func (c *Config) UpdateTask(name string, task *BackupTask) {
-	for i := range c.Tasks {
-		if c.Tasks[i].Name == name {
-			c.Tasks[i] = *task
+func (c *Config) GetNodeImageTaskByName(name string) *NodeImageSyncTask {
+	for i := range c.NodeImageTasks {
+		if c.NodeImageTasks[i].Name == name {
+			result := c.NodeImageTasks[i]
+			return &result
+		}
+	}
+	return nil
+}
+
+func (c *Config) GetTaskByName(name string) interface{} {
+	if task := c.GetLocalTaskByName(name); task != nil {
+		return task
+	}
+	if task := c.GetNodeImageTaskByName(name); task != nil {
+		return task
+	}
+	return nil
+}
+
+func (c *Config) UpdateLocalTask(name string, task *LocalBackupTask) {
+	for i := range c.LocalTasks {
+		if c.LocalTasks[i].Name == name {
+			c.LocalTasks[i] = *task
 			return
 		}
 	}
-	c.Tasks = append(c.Tasks, *task)
+	c.LocalTasks = append(c.LocalTasks, *task)
 }
 
-func (c *Config) DeleteTask(name string) {
-	for i := range c.Tasks {
-		if c.Tasks[i].Name == name {
-			c.Tasks = append(c.Tasks[:i], c.Tasks[i+1:]...)
+func (c *Config) UpdateNodeImageTask(name string, task *NodeImageSyncTask) {
+	for i := range c.NodeImageTasks {
+		if c.NodeImageTasks[i].Name == name {
+			c.NodeImageTasks[i] = *task
+			return
+		}
+	}
+	c.NodeImageTasks = append(c.NodeImageTasks, *task)
+}
+
+func (c *Config) DeleteLocalTask(name string) {
+	for i := range c.LocalTasks {
+		if c.LocalTasks[i].Name == name {
+			c.LocalTasks = append(c.LocalTasks[:i], c.LocalTasks[i+1:]...)
+			return
+		}
+	}
+}
+
+func (c *Config) DeleteNodeImageTask(name string) {
+	for i := range c.NodeImageTasks {
+		if c.NodeImageTasks[i].Name == name {
+			c.NodeImageTasks = append(c.NodeImageTasks[:i], c.NodeImageTasks[i+1:]...)
 			return
 		}
 	}

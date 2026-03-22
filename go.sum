@@ -1,3 +1,7 @@
+github.com/golang-jwt/jwt/v5 v5.2.1 h1:OuVbFODueb089Lh128TAcimifWaLhJwVflnrgM17wHk=
+github.com/golang-jwt/jwt/v5 v5.2.1/go.mod h1:pqrtFR0X4osieyHYxtmOUWsAWrfe1Q5UVIyoH402zdk=
+github.com/klauspost/compress v1.18.5 h1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE=
+github.com/klauspost/compress v1.18.5/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/mzky/zip v0.0.0-20240709011722-16a3ac64cd1d h1:Kj5e8maLYr15fcaWGwjobjhlGcvQgzmOoVhj+Fc4Ue4=
 github.com/mzky/zip v0.0.0-20240709011722-16a3ac64cd1d/go.mod h1:nbeXRTTEZNdpEvY28aGERF/6Du3a3BfcPr1ETZ3anwI=
 github.com/yeka/zip v0.0.0-20231116150916-03d6312748a9 h1:K8gF0eekWPEX+57l30ixxzGhHH/qscI3JCnuhbN6V4M=

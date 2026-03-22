@@ -9,7 +9,8 @@ import (
 	"webdav-backup/logger"
 )
 
-type TaskFunc func(task *config.BackupTask) error
+// TaskFunc 现在支持两种任务类型
+type TaskFunc func(task interface{}) error
 
 type ExecutionStatus struct {
 	TaskName  string    `json:"task_name"`
@@ -31,7 +32,9 @@ type Scheduler struct {
 }
 
 type scheduledTask struct {
-	task     *config.BackupTask
+	task     interface{} // 可以是 *config.LocalBackupTask 或 *config.NodeImageSyncTask
+	taskName string
+	taskType string // "local" 或 "nodeimage"
 	stopChan chan struct{}
 	lastRun  time.Time
 	nextRun  time.Time
@@ -56,10 +59,19 @@ func (s *Scheduler) Start(cfg *config.Config) {
 
 	s.isRunning = true
 
-	for i := range cfg.Tasks {
-		task := &cfg.Tasks[i]
+	// 调度本地备份任务
+	for i := range cfg.LocalTasks {
+		task := &cfg.LocalTasks[i]
 		if task.Enabled {
-			s.scheduleTaskLocked(task)
+			s.scheduleTaskLocked(task, "local")
+		}
+	}
+
+	// 调度NodeImage同步任务
+	for i := range cfg.NodeImageTasks {
+		task := &cfg.NodeImageTasks[i]
+		if task.Enabled {
+			s.scheduleTaskLocked(task, "nodeimage")
 		}
 	}
 
@@ -92,32 +104,59 @@ func (s *Scheduler) Reload(cfg *config.Config) {
 		delete(s.tasks, name)
 	}
 
-	for i := range cfg.Tasks {
-		task := &cfg.Tasks[i]
+	// 调度本地备份任务
+	for i := range cfg.LocalTasks {
+		task := &cfg.LocalTasks[i]
 		if task.Enabled {
-			s.scheduleTaskLocked(task)
+			s.scheduleTaskLocked(task, "local")
+		}
+	}
+
+	// 调度NodeImage同步任务
+	for i := range cfg.NodeImageTasks {
+		task := &cfg.NodeImageTasks[i]
+		if task.Enabled {
+			s.scheduleTaskLocked(task, "nodeimage")
 		}
 	}
 
 	logger.Info("Scheduler reloaded with %d tasks", len(s.tasks))
 }
 
-func (s *Scheduler) scheduleTaskLocked(task *config.BackupTask) {
-	if _, exists := s.tasks[task.Name]; exists {
+func (s *Scheduler) scheduleTaskLocked(task interface{}, taskType string) {
+	var taskName string
+	var schedule config.ScheduleConfig
+
+	// 提取任务名称和调度配置
+	switch t := task.(type) {
+	case *config.LocalBackupTask:
+		taskName = t.Name
+		schedule = t.Schedule
+	case *config.NodeImageSyncTask:
+		taskName = t.Name
+		schedule = t.Schedule
+	default:
+		logger.Error("不支持的任務類型: %T", task)
+		return
+	}
+
+	if _, exists := s.tasks[taskName]; exists {
 		return
 	}
 
 	st := &scheduledTask{
 		task:     task,
+		taskName: taskName,
+		taskType: taskType,
 		stopChan: make(chan struct{}),
 	}
 
-	st.nextRun = calculateNextRun(&task.Schedule)
+	st.nextRun = calculateNextRun(&schedule)
 
 	go s.runScheduledTask(st)
 
-	s.tasks[task.Name] = st
-	logger.Info("[%s] Scheduled: %s, next run: %s", task.Name, task.Schedule.String(), st.nextRun.Format("2006-01-02 15:04:05"))
+	s.tasks[taskName] = st
+	logger.Info("[%s] Scheduled: %s, next run: %s", taskName, schedule.String(), st.nextRun.Format("2006-01-02 15:04:05"))
 }
 
 func (s *Scheduler) runScheduledTask(st *scheduledTask) {
@@ -136,21 +175,34 @@ func (s *Scheduler) runScheduledTask(st *scheduledTask) {
 		case <-timer.C:
 			s.executeTask(st)
 			st.lastRun = time.Now()
-			st.nextRun = calculateNextRun(&st.task.Schedule)
-			logger.Info("[%s] Next run: %s", st.task.Name, st.nextRun.Format("2006-01-02 15:04:05"))
+			
+			// 计算下一次运行时间
+			var schedule config.ScheduleConfig
+			switch t := st.task.(type) {
+			case *config.LocalBackupTask:
+				schedule = t.Schedule
+			case *config.NodeImageSyncTask:
+				schedule = t.Schedule
+			default:
+				logger.Error("不支持的任務類型: %T", st.task)
+				continue
+			}
+			
+			st.nextRun = calculateNextRun(&schedule)
+			logger.Info("[%s] Next run: %s", st.taskName, st.nextRun.Format("2006-01-02 15:04:05"))
 			timer.Reset(time.Until(st.nextRun))
 		}
 	}
 }
 
 func (s *Scheduler) executeTask(st *scheduledTask) {
-	if !s.tryStartTask(st.task.Name) {
-		logger.Warn("[%s] Task is already running, skipping", st.task.Name)
+	if !s.tryStartTask(st.taskName) {
+		logger.Warn("[%s] Task is already running, skipping", st.taskName)
 		return
 	}
-	defer s.finishTask(st.task.Name)
+	defer s.finishTask(st.taskName)
 
-	logger.Info("[%s] Executing scheduled task", st.task.Name)
+	logger.Info("[%s] Executing scheduled task", st.taskName)
 	s.runTaskWithStatus(st.task)
 }
 
@@ -170,9 +222,22 @@ func (s *Scheduler) finishTask(name string) {
 	s.runningMu.Unlock()
 }
 
-func (s *Scheduler) runTaskWithStatus(task *config.BackupTask) {
+func (s *Scheduler) runTaskWithStatus(task interface{}) {
+	var taskName string
+	
+	// 提取任务名称
+	switch t := task.(type) {
+	case *config.LocalBackupTask:
+		taskName = t.Name
+	case *config.NodeImageSyncTask:
+		taskName = t.Name
+	default:
+		logger.Error("不支持的任務類型: %T", task)
+		return
+	}
+
 	status := &ExecutionStatus{
-		TaskName:  task.Name,
+		TaskName:  taskName,
 		Status:    "running",
 		StartTime: time.Now(),
 	}
@@ -180,7 +245,7 @@ func (s *Scheduler) runTaskWithStatus(task *config.BackupTask) {
 
 	if s.taskFunc != nil {
 		if err := s.taskFunc(task); err != nil {
-			logger.Error("[%s] Task execution failed: %v", task.Name, err)
+			logger.Error("[%s] Task execution failed: %v", taskName, err)
 			status.Status = "failed"
 			status.Error = err.Error()
 		} else {
@@ -216,17 +281,33 @@ func (s *Scheduler) GetAllExecutionStatus() map[string]*ExecutionStatus {
 	return result
 }
 
-func (s *Scheduler) AddTask(task *config.BackupTask) {
+func (s *Scheduler) AddTask(task interface{}, taskType string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if st, exists := s.tasks[task.Name]; exists {
-		close(st.stopChan)
-		delete(s.tasks, task.Name)
+	var taskName string
+	var enabled bool
+
+	// 提取任务名称和启用状态
+	switch t := task.(type) {
+	case *config.LocalBackupTask:
+		taskName = t.Name
+		enabled = t.Enabled
+	case *config.NodeImageSyncTask:
+		taskName = t.Name
+		enabled = t.Enabled
+	default:
+		logger.Error("不支持的任務類型: %T", task)
+		return
 	}
 
-	if task.Enabled && s.isRunning {
-		s.scheduleTaskLocked(task)
+	if st, exists := s.tasks[taskName]; exists {
+		close(st.stopChan)
+		delete(s.tasks, taskName)
+	}
+
+	if enabled && s.isRunning {
+		s.scheduleTaskLocked(task, taskType)
 	}
 }
 
@@ -253,16 +334,28 @@ func (s *Scheduler) RunTaskNow(name string) error {
 	return s.RunTaskByName(st.task)
 }
 
-func (s *Scheduler) RunTaskByName(task *config.BackupTask) error {
-	if !s.tryStartTask(task.Name) {
-		return fmt.Errorf("task %s is already running", task.Name)
-	}
-	defer s.finishTask(task.Name)
+func (s *Scheduler) RunTaskByName(task interface{}) error {
+	var taskName string
 
-	logger.Info("[%s] Manual execution triggered", task.Name)
+	// 提取任务名称
+	switch t := task.(type) {
+	case *config.LocalBackupTask:
+		taskName = t.Name
+	case *config.NodeImageSyncTask:
+		taskName = t.Name
+	default:
+		return fmt.Errorf("不支持的任務類型: %T", task)
+	}
+
+	if !s.tryStartTask(taskName) {
+		return fmt.Errorf("task %s is already running", taskName)
+	}
+	defer s.finishTask(taskName)
+
+	logger.Info("[%s] Manual execution triggered", taskName)
 	s.runTaskWithStatus(task)
 
-	status := s.GetExecutionStatus(task.Name)
+	status := s.GetExecutionStatus(taskName)
 	if status != nil && status.Status == "failed" {
 		return fmt.Errorf("%s", status.Error)
 	}
@@ -282,10 +375,26 @@ func (s *Scheduler) GetTaskStatus(name string) *TaskStatus {
 	running := s.runningTasks[name]
 	s.runningMu.RUnlock()
 
+	// 提取任务详细信息
+	var enabled bool
+	var scheduleStr string
+
+	switch t := st.task.(type) {
+	case *config.LocalBackupTask:
+		enabled = t.Enabled
+		scheduleStr = t.Schedule.String()
+	case *config.NodeImageSyncTask:
+		enabled = t.Enabled
+		scheduleStr = t.Schedule.String()
+	default:
+		return nil
+	}
+
 	return &TaskStatus{
-		Name:     st.task.Name,
-		Enabled:  st.task.Enabled,
-		Schedule: st.task.Schedule.String(),
+		Name:     st.taskName,
+		Type:     st.taskType,
+		Enabled:  enabled,
+		Schedule: scheduleStr,
 		LastRun:  st.lastRun,
 		NextRun:  st.nextRun,
 		Running:  running,
@@ -301,13 +410,29 @@ func (s *Scheduler) GetAllTaskStatus() []*TaskStatus {
 
 	statuses := make([]*TaskStatus, 0, len(s.tasks))
 	for _, st := range s.tasks {
+		// 提取任务详细信息
+		var enabled bool
+		var scheduleStr string
+
+		switch t := st.task.(type) {
+		case *config.LocalBackupTask:
+			enabled = t.Enabled
+			scheduleStr = t.Schedule.String()
+		case *config.NodeImageSyncTask:
+			enabled = t.Enabled
+			scheduleStr = t.Schedule.String()
+		default:
+			continue
+		}
+
 		statuses = append(statuses, &TaskStatus{
-			Name:     st.task.Name,
-			Enabled:  st.task.Enabled,
-			Schedule: st.task.Schedule.String(),
+			Name:     st.taskName,
+			Type:     st.taskType,
+			Enabled:  enabled,
+			Schedule: scheduleStr,
 			LastRun:  st.lastRun,
 			NextRun:  st.nextRun,
-			Running:  s.runningTasks[st.task.Name],
+			Running:  s.runningTasks[st.taskName],
 		})
 	}
 	return statuses
@@ -315,6 +440,7 @@ func (s *Scheduler) GetAllTaskStatus() []*TaskStatus {
 
 type TaskStatus struct {
 	Name     string    `json:"name"`
+	Type     string    `json:"type"`
 	Enabled  bool      `json:"enabled"`
 	Schedule string    `json:"schedule"`
 	LastRun  time.Time `json:"last_run"`

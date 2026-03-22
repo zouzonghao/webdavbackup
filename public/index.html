@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>备份管理器</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="favicon.avif" type="image/avif">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>备份管理器</h1>
+            <p>WebDAV 备份同步服务管理面板</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="tasks">任务管理</button>
+            <button class="tab-btn" data-tab="webdav">WebDAV 服务器</button>
+            <button class="tab-btn" data-tab="status">运行状态</button>
+            <button class="tab-btn" data-tab="logs">实时日志</button>
+        </nav>
+
+        <main>
+            <section id="tasks-tab" class="card">
+                <div class="card-header">
+                    <h2>备份任务</h2>
+                    <button class="btn-icon" id="add-task-btn">添加任务</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>类型</th>
+                            <th>计划</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasks-list"></tbody>
+                </table>
+            </section>
+
+            <section id="webdav-tab" class="card hidden">
+                <div class="card-header">
+                    <h2>WebDAV 服务器</h2>
+                    <button class="btn-icon" id="add-webdav-btn">添加服务器</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>地址</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="webdav-list"></tbody>
+                </table>
+            </section>
+
+            <section id="status-tab" class="card hidden">
+                <div class="card-header">
+                    <h2>运行状态</h2>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>任务</th>
+                            <th>上次运行</th>
+                            <th>下次运行</th>
+                            <th>执行状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="status-list"></tbody>
+                </table>
+            </section>
+
+            <section id="logs-tab" class="card hidden">
+                <div class="card-header">
+                    <h2>实时日志</h2>
+                    <button class="btn-icon" id="clear-log-btn">清除日志</button>
+                </div>
+                <div id="log-container"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="task-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="task-modal-title">添加任务</h3>
+                <button class="close-btn">&times;</button>
+            </div>
+            <form id="task-form">
+                <input type="hidden" id="task-original-name">
+                <div class="form-row">
+                    <div class="form-group flex-grow">
+                        <label>名称</label>
+                        <input type="text" id="task-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>类型</label>
+                        <select id="task-type">
+                            <option value="local">本地备份</option>
+                            <option value="nodeimage">NodeImage 同步</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="local-task-fields">
+                    <div class="form-group">
+                        <label>备份路径（每行一个）</label>
+                        <textarea id="task-paths" rows="4" placeholder="/path/to/backup&#10;/another/path"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>加密密码（可选）</label>
+                            <input type="text" id="task-encrypt-pwd" placeholder="留空则不加密">
+                        </div>
+                        <div class="form-group">
+                            <label>WebDAV路径（可选）</label>
+                            <input type="text" id="task-local-base-path" placeholder="留空则存到根目录">
+                        </div>
+                    </div>
+                </div>
+
+                <div id="nodeimage-task-fields" class="hidden">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>同步类型</label>
+                            <select id="task-sync-mode">
+                                <option value="incremental">增量同步 (API Key) - 只同步最近图片</option>
+                                <option value="full">全量同步 (Cookie) - 同步所有图片并删除多余文件</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>WebDAV路径</label>
+                            <input type="text" id="task-base-path" placeholder="WebDAV上的存储路径">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>API Key <span class="hint" id="apikey-hint">(增量同步必需)</span></label>
+                            <input type="text" id="task-api-key" placeholder="NodeImage API Key">
+                        </div>
+                        <div class="form-group">
+                            <label>Cookie <span class="hint" id="cookie-hint">(全量同步必需)</span></label>
+                            <input type="text" id="task-cookie" placeholder="用于全量同步">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>WebDAV 服务器</label>
+                    <div id="webdav-checkboxes" class="webdav-checkboxes"></div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>计划类型</label>
+                        <select id="task-schedule-type">
+                            <option value="hourly">每小时</option>
+                            <option value="daily" selected>每天</option>
+                            <option value="weekly">每周</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="hour-group">
+                        <label>小时</label>
+                        <input type="number" id="task-hour" value="0" min="0" max="23">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group hidden" id="day-group">
+                        <label>星期</label>
+                        <select id="task-day">
+                            <option value="0">周日</option>
+                            <option value="1">周一</option>
+                            <option value="2">周二</option>
+                            <option value="3">周三</option>
+                            <option value="4">周四</option>
+                            <option value="5">周五</option>
+                            <option value="6">周六</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>分钟</label>
+                        <input type="number" id="task-minute" value="0" min="0" max="59">
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <div class="enable-switch">
+                        <span>启用</span>
+                        <label class="switch">
+                            <input type="checkbox" id="task-enabled" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <button type="button" class="btn-secondary close-modal">取消</button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="webdav-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="webdav-modal-title">添加 WebDAV 服务器</h3>
+                <button class="close-btn">&times;</button>
+            </div>
+            <form id="webdav-form">
+                <input type="hidden" id="webdav-original-name">
+                <div class="form-group">
+                    <label>名称</label>
+                    <input type="text" id="webdav-name" required>
+                </div>
+                <div class="form-group">
+                    <label>地址</label>
+                    <input type="url" id="webdav-url" required placeholder="https://dav.example.com">
+                </div>
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="webdav-username">
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="webdav-password" placeholder="留空则不修改">
+                </div>
+                <div class="form-group">
+                    <label>超时时间（秒）</label>
+                    <input type="number" id="webdav-timeout" value="300">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary close-modal">取消</button>
+                    <button type="submit" class="btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

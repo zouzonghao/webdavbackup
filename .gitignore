@@ -5,6 +5,8 @@
 *.so
 *.dylib
 *copy*
+#原项目
+_original
 
 # Binary output
 webdav-backup
