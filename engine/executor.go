@@ -140,7 +140,10 @@ func (e *Executor) ExecuteLocalTask(task *config.LocalBackupTask, webdavClients 
 			}
 			continue
 		}
-		validPaths = append(validPaths, config.BackupItem{Path: item.Path})
+		validPaths = append(validPaths, config.BackupItem{
+			Path:         item.Path,
+			ExcludePaths: item.ExcludePaths,
+		})
 		if info.IsDir() {
 			logger.Info("[%s] 路径验证通过: %s (目录)", task.Name, item.Path)
 		} else {
@@ -245,10 +248,22 @@ func (e *Executor) createStream(task *config.LocalBackupTask) (*StreamResult, er
 	var totalSize int64
 
 	for _, item := range task.Paths {
+		excludePaths := item.ExcludePaths
 		err := filepath.Walk(item.Path, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
+		// 检查是否在排除路径中
+		for _, excludePath := range excludePaths {
+			// 精确匹配或子路径匹配（防止 /opt/data 匹配到 /opt/data2）
+			if path == excludePath || strings.HasPrefix(path, excludePath+string(os.PathSeparator)) {
+				if info.IsDir() {
+					logger.Info("[%s] 跳过排除目录: %s", task.Name, path)
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
 			files = append(files, fileEntry{
 				path:  path,
 				info:  info,

@@ -32,7 +32,8 @@ type WebServerConfig struct {
 }
 
 type BackupItem struct {
-	Path string `yaml:"path" json:"path"`
+	Path         string   `yaml:"path" json:"path"`
+	ExcludePaths []string `yaml:"exclude_paths" json:"exclude_paths"`
 }
 
 type LocalBackupTask struct {

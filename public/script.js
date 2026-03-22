@@ -62,7 +62,8 @@ function connectWebSocket() {
 
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        addLog(data.message || data.Message, data.level || data.Level || 'INFO');
+        const timestamp = data.time || data.Time || new Date().toLocaleTimeString();
+        addLog(data.message || data.Message, data.level || data.Level || 'INFO', timestamp);
     };
 
     ws.onclose = () => {
@@ -78,11 +79,12 @@ function connectWebSocket() {
 
 let userScrolledToBottom = true;
 
-function addLog(message, level) {
+function addLog(message, level, timestamp) {
     const container = document.getElementById('log-container');
     const p = document.createElement('p');
     p.className = `log-${level.toUpperCase()}`;
-    p.textContent = `[${new Date().toLocaleTimeString()}] [${level.toUpperCase()}] ${message}`;
+    const timeStr = timestamp || new Date().toLocaleTimeString();
+    p.textContent = `[${timeStr}] [${level.toUpperCase()}] ${message}`;
     container.appendChild(p);
 
     // 只有当用户滚动到最底部时才自动滚动
@@ -282,6 +284,12 @@ function showTaskModal(editData = null) {
             updateSyncModeHints();
         } else {
             document.getElementById('task-paths').value = (editData.paths || []).map(p => p.path).join('\n');
+            // 加载所有排除路径（从第一个路径项获取，或者汇总所有路径项的排除路径）
+            const allExcludePaths = new Set();
+            (editData.paths || []).forEach(p => {
+                (p.exclude_paths || []).forEach(ep => allExcludePaths.add(ep));
+            });
+            document.getElementById('task-exclude-paths').value = Array.from(allExcludePaths).join('\n');
             document.getElementById('task-encrypt-pwd').value = editData.encrypt_pwd || '';
             document.getElementById('task-local-base-path').value = editData.base_path || '';
         }
@@ -395,7 +403,11 @@ async function handleTaskSubmit(e) {
             base_path: document.getElementById('task-base-path').value
         };
     } else {
-        taskData.paths = document.getElementById('task-paths').value.split('\n').filter(p => p.trim()).map(p => ({ path: p.trim() }));
+        const excludePaths = document.getElementById('task-exclude-paths').value.split('\n').filter(p => p.trim()).map(p => p.trim());
+        taskData.paths = document.getElementById('task-paths').value.split('\n').filter(p => p.trim()).map(p => ({ 
+            path: p.trim(),
+            exclude_paths: excludePaths
+        }));
         taskData.encrypt_pwd = document.getElementById('task-encrypt-pwd').value;
         taskData.base_path = document.getElementById('task-local-base-path').value;
     }

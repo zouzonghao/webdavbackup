@@ -112,6 +112,11 @@
                         <label>备份路径（每行一个）</label>
                         <textarea id="task-paths" rows="4" placeholder="/path/to/backup&#10;/another/path"></textarea>
                     </div>
+                    <div class="form-group">
+                        <label>排除路径（每行一个，可选）</label>
+                        <textarea id="task-exclude-paths" rows="3" placeholder="/path/to/backup/exclude1&#10;/path/to/backup/exclude2"></textarea>
+                        <small style="color: var(--subtle-text-color);">排除的路径将不会被备份，适用于排除大型数据目录如数据库存储</small>
+                    </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>加密密码（可选）</label>

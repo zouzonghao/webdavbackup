@@ -46,13 +46,17 @@ local_tasks:
     encrypt_pwd: "strong-password-for-encryption"
     base_path: ""  # 可选，WebDAV上的存储路径
   
-  # 示例2: 每小时配置文件备份
+  # 示例2: 每小时配置文件备份（带排除路径）
   - name: config-backup
     type: local
     enabled: true
     paths:
       - path: /etc/nginx/nginx.conf
       - path: /etc/mysql/my.cnf
+      - path: /opt
+        exclude_paths:
+          - /opt/nezha/dashboard/data/tsdb/data/small/
+          - /opt/large-data/cache/
     webdav:
       - local
     schedule:
@@ -142,6 +146,8 @@ webserver:
 #    - type: 固定为 "local"
 #    - enabled: 是否启用
 #    - paths: 备份路径列表
+#      - path: 要备份的路径
+#      - exclude_paths: 排除路径列表（可选，避免备份大型数据目录如数据库存储）
 #    - webdav: 目标WebDAV服务器名称列表
 #    - schedule: 调度配置
 #    - encrypt_pwd: ZIP加密密码（空字符串表示不加密）

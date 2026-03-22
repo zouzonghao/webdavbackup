@@ -243,6 +243,13 @@ td:last-child {
 /* 任务管理表格最后一列使用 flex */
 #tasks-list td:last-child {
     display: flex;
+    gap: 0.5rem;
+}
+
+/* WebDAV 服务器表格最后一列也使用 flex */
+#webdav-list td:last-child {
+    display: flex;
+    gap: 0.5rem;
 }
 
 /* 运行状态表格正常显示 */
