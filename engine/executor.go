@@ -27,6 +27,10 @@ func joinWebDAVPath(base, sub string) string {
 	return base + "/" + sub
 }
 
+const (
+	cacheMaxItems = 10000 // 缓存最大文件数
+)
+
 var (
 	webdavCache   []webdav.FileInfo
 	webdavCacheMu sync.RWMutex
@@ -36,6 +40,15 @@ func InvalidateWebdavCache() {
 	webdavCacheMu.Lock()
 	defer webdavCacheMu.Unlock()
 	webdavCache = nil
+}
+
+// setCacheWithLimit 设置缓存，如果超过限制则不缓存
+func setCacheWithLimit(files []webdav.FileInfo) {
+	if len(files) > cacheMaxItems {
+		logger.Warn("[WebDAV Cache] 文件数量 %d 超过限制 %d，跳过缓存", len(files), cacheMaxItems)
+		return
+	}
+	webdavCache = files
 }
 
 type Executor struct {
@@ -437,7 +450,7 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 			existingFiles = []webdav.FileInfo{}
 		} else {
 			webdavCacheMu.Lock()
-			webdavCache = existingFiles
+			setCacheWithLimit(existingFiles)
 			webdavCacheMu.Unlock()
 			logger.Info("[NodeImage->%s] 发现 %d 个文件", client.GetName(), len(existingFiles))
 		}
