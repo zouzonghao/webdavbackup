@@ -10,6 +10,92 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadWebDAV();
 });
 
+// Toast 通知系统
+function showToast(type, title, message, duration = 3000) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    const icons = {
+        success: '✓',
+        error: '✕',
+        info: 'ℹ',
+        warning: '⚠'
+    };
+    
+    toast.innerHTML = `
+        <span class="toast-icon">${icons[type]}</span>
+        <div class="toast-content">
+            ${title ? `<div class="toast-title">${title}</div>` : ''}
+            <div class="toast-message">${message}</div>
+        </div>
+        <button class="toast-close">&times;</button>
+    `;
+    
+    container.appendChild(toast);
+    
+    // 关闭按钮事件
+    const closeBtn = toast.querySelector('.toast-close');
+    closeBtn.addEventListener('click', () => {
+        removeToast(toast);
+    });
+    
+    // 自动移除
+    if (duration > 0) {
+        setTimeout(() => {
+            removeToast(toast);
+        }, duration);
+    }
+    
+    return toast;
+}
+
+function removeToast(toast) {
+    if (toast.classList.contains('hiding')) return;
+    
+    toast.classList.add('hiding');
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+        }
+    }, 300);
+}
+
+// 自定义确认弹窗
+function showConfirm(title, message) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirm-modal');
+        const titleEl = modal.querySelector('.confirm-title');
+        const messageEl = modal.querySelector('.confirm-message');
+        const cancelBtn = document.getElementById('confirm-cancel');
+        const okBtn = document.getElementById('confirm-ok');
+        
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+        modal.classList.add('show');
+        
+        const handleConfirm = () => {
+            modal.classList.remove('show');
+            resolve(true);
+            cleanup();
+        };
+        
+        const handleCancel = () => {
+            modal.classList.remove('show');
+            resolve(false);
+            cleanup();
+        };
+        
+        const cleanup = () => {
+            okBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+        };
+        
+        okBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+    });
+}
+
 function initTabs() {
     const tabBtns = document.querySelectorAll('.tab-btn');
     tabBtns.forEach(btn => {
@@ -420,9 +506,10 @@ async function handleTaskSubmit(e) {
         }
         document.getElementById('task-modal').classList.remove('show');
         await loadTasks();
+        showToast('success', '保存成功', `任务 "${taskData.name}" 已保存`, 3000);
     } catch (error) {
         console.error('Failed to save task:', error);
-        alert('保存失败');
+        showToast('error', '保存失败', '无法保存任务', 5000);
     }
 }
 
@@ -446,9 +533,10 @@ async function handleWebdavSubmit(e) {
         }
         document.getElementById('webdav-modal').classList.remove('show');
         await loadWebDAV();
+        showToast('success', '保存成功', `服务器 "${webdavData.name}" 已保存`, 3000);
     } catch (error) {
         console.error('Failed to save webdav:', error);
-        alert('保存失败');
+        showToast('error', '保存失败', '无法保存服务器配置', 5000);
     }
 }
 
@@ -456,14 +544,23 @@ async function runTask(name) {
     try {
         const result = await api('POST', `/api/tasks/${name}/run`);
         if (result.success) {
-            alert(`任务 ${name} 已开始执行`);
+            // 显示成功的 Toast 通知
+            showToast('success', '任务启动成功', `任务 "${name}" 已开始执行`, 3000);
             addLog(`任务 ${name} 开始执行`, 'INFO');
+            
+            // 自动跳转到实时日志标签页
+            setTimeout(() => {
+                const logsTab = document.querySelector('.tab-btn[data-tab="logs"]');
+                if (logsTab) {
+                    logsTab.click();
+                }
+            }, 500);
         } else {
-            alert(`启动任务失败: ${result.message || '未知错误'}`);
+            showToast('error', '启动失败', result.message || '未知错误', 5000);
         }
     } catch (error) {
         console.error('Failed to run task:', error);
-        alert('启动任务失败');
+        showToast('error', '启动失败', '无法连接到服务器', 5000);
     }
 }
 
@@ -479,24 +576,30 @@ async function editTask(name) {
 }
 
 async function deleteTask(name) {
-    if (!confirm(`确定删除任务 ${name}？`)) return;
+    const confirmed = await showConfirm('确认删除任务', `您确定要删除任务 "${name}" 吗？此操作无法撤销。`);
+    if (!confirmed) return;
     
     try {
         await api('DELETE', `/api/tasks/${name}`);
         await loadTasks();
+        showToast('success', '删除成功', `任务 "${name}" 已删除`, 3000);
     } catch (error) {
         console.error('Failed to delete task:', error);
-        alert('删除失败');
+        showToast('error', '删除失败', '无法删除任务', 5000);
     }
 }
 
 async function testWebdav(name) {
     try {
         const result = await api('POST', `/api/webdav/${name}/test`);
-        alert(result.success ? `连接成功: ${result.message}` : `连接失败: ${result.message}`);
+        if (result.success) {
+            showToast('success', '连接成功', result.message, 3000);
+        } else {
+            showToast('error', '连接失败', result.message, 5000);
+        }
     } catch (error) {
         console.error('Failed to test webdav:', error);
-        alert('测试失败');
+        showToast('error', '测试失败', '无法连接到服务器', 5000);
     }
 }
 
@@ -512,13 +615,15 @@ async function editWebdav(name) {
 }
 
 async function deleteWebdav(name) {
-    if (!confirm(`确定删除服务器 ${name}？`)) return;
+    const confirmed = await showConfirm('确认删除服务器', `您确定要删除服务器 "${name}" 吗？此操作无法撤销。`);
+    if (!confirmed) return;
     
     try {
         await api('DELETE', `/api/webdav/${name}`);
         await loadWebDAV();
+        showToast('success', '删除成功', `服务器 "${name}" 已删除`, 3000);
     } catch (error) {
         console.error('Failed to delete webdav:', error);
-        alert('删除失败');
+        showToast('error', '删除失败', '无法删除服务器', 5000);
     }
 }
