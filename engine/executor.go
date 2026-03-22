@@ -482,8 +482,7 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 		var err error
 		existingFiles, err = client.ListFiles(basePath)
 		if err != nil {
-			logger.Warn("[NodeImage->%s] 获取现有文件列表失败: %v，将上传所有图片", client.GetName(), err)
-			existingFiles = []webdav.FileInfo{}
+			return fmt.Errorf("获取现有文件列表失败: %w", err)
 		} else {
 			webdavCacheMu.Lock()
 			setCacheWithLimit(existingFiles)
