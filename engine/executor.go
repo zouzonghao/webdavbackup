@@ -114,9 +114,30 @@ func (e *Executor) ExecuteLocalTask(task *config.LocalBackupTask, webdavClients 
 	logger.Info("[%s] 验证备份路径...", task.Name)
 	var validPaths []config.BackupItem
 	for _, item := range task.Paths {
+		// 检查每一级目录
+		pathParts := strings.Split(item.Path, "/")
+		currentPath := ""
+		for i, part := range pathParts {
+			if part == "" {
+				continue
+			}
+			currentPath += "/" + part
+			if _, err := os.Stat(currentPath); err != nil {
+				logger.Warn("[%s] 路径检查失败在第 %d 级: %s (%v)", task.Name, i, currentPath, err)
+				break
+			}
+		}
+		
 		info, err := os.Stat(item.Path)
 		if err != nil {
 			logger.Warn("[%s] 路径不可访问，跳过: %s (%v)", task.Name, item.Path, err)
+			// 尝试检查文件是否可读
+			if file, openErr := os.Open(item.Path); openErr != nil {
+				logger.Warn("[%s] 文件打开失败: %v", task.Name, openErr)
+			} else {
+				file.Close()
+				logger.Warn("[%s] 文件可以打开但 stat 失败", task.Name)
+			}
 			continue
 		}
 		validPaths = append(validPaths, config.BackupItem{Path: item.Path})

@@ -126,12 +126,7 @@ webserver:
   host: 0.0.0.0
   port: 8080
   username: admin
-  password: admin123
-
-# ========== NodeImage全局默认配置 ==========
-nodeimage_defaults:
-  api_url: "https://api.nodeimage.com/api/images"
-  concurrency: 5
+  password: admin
 
 # =========================================================
 # 配置说明：
@@ -173,7 +168,7 @@ nodeimage_defaults:
 #    - day: 0=周日, 1=周一, ..., 6=周六（weekly时使用）
 #    - hour: 小时（0-23）
 #    - minute: 分钟（0-59）
-# 
+#
 # 5. 加密说明：
 #    - 使用AES-256加密的ZIP格式
 #    - Windows用户可用7-Zip直接解压

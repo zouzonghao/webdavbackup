@@ -76,14 +76,27 @@ function connectWebSocket() {
     };
 }
 
+let userScrolledToBottom = true;
+
 function addLog(message, level) {
     const container = document.getElementById('log-container');
     const p = document.createElement('p');
     p.className = `log-${level.toUpperCase()}`;
     p.textContent = `[${new Date().toLocaleTimeString()}] [${level.toUpperCase()}] ${message}`;
     container.appendChild(p);
-    container.scrollTop = container.scrollHeight;
+
+    // 只有当用户滚动到最底部时才自动滚动
+    if (userScrolledToBottom) {
+        container.scrollTop = container.scrollHeight;
+    }
 }
+
+// 监听滚动事件，判断用户是否滚动到最底部
+document.getElementById('log-container').addEventListener('scroll', function() {
+    const container = this;
+    const threshold = 50; // 误差阈值
+    userScrolledToBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < threshold;
+});
 
 function clearLogs() {
     document.getElementById('log-container').innerHTML = '';

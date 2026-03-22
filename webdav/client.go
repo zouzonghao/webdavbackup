@@ -233,12 +233,19 @@ func (c *EnhancedClient) Mkdir(path string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusCreated {
+	switch resp.StatusCode {
+	case http.StatusCreated:
 		logger.Info("[%s] 目录创建成功: %s", c.Name, path)
 		return nil
+	case http.StatusOK:
+		// 某些 WebDAV 服务器在目录已存在时返回 200
+		return nil
+	case http.StatusMethodNotAllowed:
+		// 405 表示目录已存在
+		return nil
+	default:
+		return fmt.Errorf("创建目录失败，状态码: %d", resp.StatusCode)
 	}
-
-	return fmt.Errorf("创建目录失败，状态码: %d", resp.StatusCode)
 }
 
 func (c *EnhancedClient) Delete(path string) error {
