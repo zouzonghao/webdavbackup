@@ -127,7 +127,7 @@ func (e *Executor) ExecuteLocalTask(task *config.LocalBackupTask, webdavClients 
 				break
 			}
 		}
-		
+
 		info, err := os.Stat(item.Path)
 		if err != nil {
 			logger.Warn("[%s] 路径不可访问，跳过: %s (%v)", task.Name, item.Path, err)
@@ -253,17 +253,17 @@ func (e *Executor) createStream(task *config.LocalBackupTask) (*StreamResult, er
 			if err != nil {
 				return err
 			}
-		// 检查是否在排除路径中
-		for _, excludePath := range excludePaths {
-			// 精确匹配或子路径匹配（防止 /opt/data 匹配到 /opt/data2）
-			if path == excludePath || strings.HasPrefix(path, excludePath+string(os.PathSeparator)) {
-				if info.IsDir() {
-					logger.Info("[%s] 跳过排除目录: %s", task.Name, path)
-					return filepath.SkipDir
+			// 检查是否在排除路径中
+			for _, excludePath := range excludePaths {
+				// 精确匹配或子路径匹配（防止 /opt/data 匹配到 /opt/data2）
+				if path == excludePath || strings.HasPrefix(path, excludePath+string(os.PathSeparator)) {
+					if info.IsDir() {
+						logger.Info("[%s] 跳过排除目录: %s", task.Name, path)
+						return filepath.SkipDir
+					}
+					return nil
 				}
-				return nil
 			}
-		}
 			files = append(files, fileEntry{
 				path:  path,
 				info:  info,
@@ -457,7 +457,7 @@ func (e *Executor) ExecuteNodeImageTask(task *config.NodeImageSyncTask, webdavCl
 			})
 		}
 
-		if err := e.syncToWebDAV(wdClient, images, task, isFullSync); err != nil {
+		if err := e.syncToWebDAV(wdClient, client, images, task, isFullSync); err != nil {
 			logger.Error("  ✗ 同步到 %s 失败: %v", webdavName, err)
 		}
 	}
@@ -469,7 +469,7 @@ func (e *Executor) ExecuteNodeImageTask(task *config.NodeImageSyncTask, webdavCl
 	return nil
 }
 
-func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimage.ImageInfo, task *config.NodeImageSyncTask, isFullSync bool) error {
+func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, nodeClient *nodeimage.Client, images []nodeimage.ImageInfo, task *config.NodeImageSyncTask, isFullSync bool) error {
 	serverName := client.GetName()
 	logger.Info("  -> [%s] 开始同步", serverName)
 
@@ -538,47 +538,41 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 		logger.Info("  -> [%s] 计划删除: %d 个文件", serverName, len(filesToDelete))
 	}
 
-	var wg sync.WaitGroup
-	concurrency := task.Concurrency
-	if concurrency <= 0 {
-		concurrency = 5
+	downloadInterval := task.DownloadInterval
+	if downloadInterval < 0 {
+		downloadInterval = 0
 	}
 
-	semaphore := make(chan struct{}, concurrency)
 	var uploadCount, deleteCount int
 	var uploadErrCount, deleteErrCount int
-	var lastProgress int
-	var mu sync.Mutex
 
-	for _, img := range filesToUpload {
-		wg.Add(1)
-		go func(img nodeimage.ImageInfo) {
-			defer wg.Done()
+	for i, img := range filesToUpload {
+		remotePath := fmt.Sprintf("%s/%s", basePath, img.Filename)
+		if err := e.uploadImage(client, nodeClient, img, remotePath, downloadInterval); err != nil {
+			logger.Error("    ✗ 上传失败 %s: %v", img.Filename, err)
+			uploadErrCount++
+		} else {
+			uploadCount++
+			progress := uploadCount * 100 / len(filesToUpload)
+			progress = progress / 10 * 10
+			logger.Info("  -> [%s] 上传进度: %d/%d (%d%%)", serverName, uploadCount, len(filesToUpload), progress)
+		}
 
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			remotePath := fmt.Sprintf("%s/%s", basePath, img.Filename)
-			if err := e.uploadImage(client, img, remotePath); err != nil {
-				logger.Error("    ✗ 上传失败 %s: %v", img.Filename, err)
-				mu.Lock()
-				uploadErrCount++
-				mu.Unlock()
-			} else {
-				mu.Lock()
-				uploadCount++
-				progress := uploadCount * 100 / len(filesToUpload)
-				progress = progress / 10 * 10
-				if progress > lastProgress {
-					logger.Info("  -> [%s] 上传进度: %d/%d (%d%%)", serverName, uploadCount, len(filesToUpload), progress)
-					lastProgress = progress
-				}
-				mu.Unlock()
-			}
-		}(img)
+		if i < len(filesToUpload)-1 {
+			time.Sleep(time.Duration(downloadInterval) * time.Second)
+		}
 	}
 
 	if isFullSync {
+		concurrency := task.Concurrency
+		if concurrency <= 0 {
+			concurrency = 5
+		}
+
+		var wg sync.WaitGroup
+		semaphore := make(chan struct{}, concurrency)
+		var mu sync.Mutex
+
 		for _, filePath := range filesToDelete {
 			wg.Add(1)
 			go func(path string) {
@@ -599,9 +593,9 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 				}
 			}(filePath)
 		}
-	}
 
-	wg.Wait()
+		wg.Wait()
+	}
 
 	if uploadCount > 0 || deleteCount > 0 {
 		InvalidateWebdavCache()
@@ -617,13 +611,19 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 	return nil
 }
 
-func (e *Executor) uploadImage(client *webdav.EnhancedClient, img nodeimage.ImageInfo, remotePath string) error {
+func (e *Executor) uploadImage(client *webdav.EnhancedClient, nodeClient *nodeimage.Client, img nodeimage.ImageInfo, remotePath string, downloadInterval int) error {
 	const maxRetries = 3
 	const retryDelay = 2 * time.Second
+	const minRetryInterval = 3
+
+	retryInterval := downloadInterval
+	if retryInterval < minRetryInterval {
+		retryInterval = minRetryInterval
+	}
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		reader, err := nodeimage.NewClient("", "", "").DownloadImageStream(img.URL)
+		reader, err := nodeClient.DownloadImageStream(img.URL)
 		if err != nil {
 			lastErr = fmt.Errorf("下载失败: %w", err)
 			if attempt < maxRetries {
@@ -637,7 +637,7 @@ func (e *Executor) uploadImage(client *webdav.EnhancedClient, img nodeimage.Imag
 			reader.Close()
 			lastErr = fmt.Errorf("上传失败: %w", err)
 			if attempt < maxRetries {
-				time.Sleep(retryDelay)
+				time.Sleep(time.Duration(retryInterval) * time.Second)
 				continue
 			}
 			return lastErr

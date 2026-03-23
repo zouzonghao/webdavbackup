@@ -362,9 +362,9 @@ func (c *EnhancedClient) Mkdir(path string) error {
 		return fmt.Errorf("创建目录请求失败: %w", err)
 	}
 
-	resp, err := c.do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -390,9 +390,9 @@ func (c *EnhancedClient) Delete(path string) error {
 		return fmt.Errorf("创建删除请求失败: %w", err)
 	}
 
-	resp, err := c.do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -413,21 +413,21 @@ func (c *EnhancedClient) TestConnection() error {
 	}
 	req.Header.Set("Depth", "0")
 
-	resp, err := c.do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("认证失败")
+		return fmt.Errorf("认证失败 (401)")
 	case http.StatusNotFound:
-		return fmt.Errorf("路径不存在")
+		return fmt.Errorf("路径不存在 (404)")
 	case http.StatusForbidden:
-		return fmt.Errorf("访问被拒绝")
+		return fmt.Errorf("访问被拒绝 (403)")
 	case http.StatusMethodNotAllowed:
-		return fmt.Errorf("不是WebDAV端点")
+		return fmt.Errorf("不是WebDAV端点 (405)")
 	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {

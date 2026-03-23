@@ -157,6 +157,14 @@
                             <input type="text" id="task-cookie" placeholder="用于全量同步">
                         </div>
                     </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>下载间隔 (秒)</label>
+                            <input type="number" id="task-download-interval" value="0" min="0" placeholder="0 表示无间隔">
+                            <small style="color: var(--subtle-text-color);">下载每张图片后的暂停时间，防止访问过快被拦截</small>
+                        </div>
+                        <div class="form-group"></div> <!-- 占位符保持对齐 -->
+                    </div>
                 </div>
 
                 <div class="form-group">

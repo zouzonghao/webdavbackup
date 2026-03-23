@@ -104,6 +104,7 @@ nodeimage_tasks:
       hour: 4
       minute: 0
     concurrency: 5
+    download_interval: 2  # 每张图片下载后暂停秒数，默认2秒
   
   # 示例2: 全量同步（使用Cookie）
   - name: nodeimage-full
@@ -124,6 +125,7 @@ nodeimage_tasks:
       hour: 5
       minute: 0
     concurrency: 3
+    download_interval: 3  # 自定义下载间隔
 
 # ========== Web管理界面配置 ==========
 webserver:
@@ -167,7 +169,8 @@ webserver:
 #      - base_path: WebDAV上的存储路径
 #    - webdav: 目标WebDAV服务器名称列表
 #    - schedule: 调度配置
-#    - concurrency: 并发数（默认5）
+#    - concurrency: 并发数（默认5，仅用于删除操作）
+#    - download_interval: 下载间隔秒数（默认2秒），每完成一张图片下载后暂停的时间
 # 
 # 4. 调度配置说明：
 #    - type: hourly/daily/weekly

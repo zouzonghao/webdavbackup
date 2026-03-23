@@ -324,7 +324,7 @@ func (s *Server) validateToken(tokenString string) bool {
 	if err != nil {
 		return false
 	}
-	
+
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
 		return claims.Username == s.config.WebServer.Username
 	}
@@ -480,8 +480,9 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		Schedule    config.ScheduleConfig  `json:"schedule"`
 		EncryptPwd  string                 `json:"encrypt_pwd"`
 		BasePath    string                 `json:"base_path"`
-		NodeImage   config.NodeImageConfig `json:"nodeimage"`
-		Concurrency int                    `json:"concurrency"`
+		NodeImage        config.NodeImageConfig `json:"nodeimage"`
+		Concurrency      int                    `json:"concurrency"`
+		DownloadInterval int                    `json:"download_interval"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -497,8 +498,9 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 			SyncMode:    req.SyncMode,
 			WebDAV:      req.WebDAV,
 			Schedule:    req.Schedule,
-			NodeImage:   req.NodeImage,
-			Concurrency: req.Concurrency,
+			NodeImage:        req.NodeImage,
+			Concurrency:      req.Concurrency,
+			DownloadInterval: req.DownloadInterval,
 		}
 		s.config.UpdateNodeImageTask(req.Name, task)
 		if s.scheduler != nil {
@@ -531,17 +533,18 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request, name string) {
 	var req struct {
-		Name        string                 `json:"name"`
-		Type        string                 `json:"type"`
-		Enabled     bool                   `json:"enabled"`
-		SyncMode    string                 `json:"sync_mode"`
-		Paths       []config.BackupItem    `json:"paths"`
-		WebDAV      []string               `json:"webdav"`
-		Schedule    config.ScheduleConfig  `json:"schedule"`
-		EncryptPwd  string                 `json:"encrypt_pwd"`
-		BasePath    string                 `json:"base_path"`
-		NodeImage   config.NodeImageConfig `json:"nodeimage"`
-		Concurrency int                    `json:"concurrency"`
+		Name             string                 `json:"name"`
+		Type             string                 `json:"type"`
+		Enabled          bool                   `json:"enabled"`
+		SyncMode         string                 `json:"sync_mode"`
+		Paths            []config.BackupItem    `json:"paths"`
+		WebDAV           []string               `json:"webdav"`
+		Schedule         config.ScheduleConfig  `json:"schedule"`
+		EncryptPwd       string                 `json:"encrypt_pwd"`
+		BasePath         string                 `json:"base_path"`
+		NodeImage        config.NodeImageConfig `json:"nodeimage"`
+		Concurrency      int                    `json:"concurrency"`
+		DownloadInterval int                    `json:"download_interval"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -557,14 +560,15 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request, name string)
 
 	if req.Type == "nodeimage" {
 		task := &config.NodeImageSyncTask{
-			Name:        req.Name,
-			Type:        req.Type,
-			Enabled:     req.Enabled,
-			SyncMode:    req.SyncMode,
-			WebDAV:      req.WebDAV,
-			Schedule:    req.Schedule,
-			NodeImage:   req.NodeImage,
-			Concurrency: req.Concurrency,
+			Name:             req.Name,
+			Type:             req.Type,
+			Enabled:          req.Enabled,
+			SyncMode:         req.SyncMode,
+			WebDAV:           req.WebDAV,
+			Schedule:         req.Schedule,
+			NodeImage:        req.NodeImage,
+			Concurrency:      req.Concurrency,
+			DownloadInterval: req.DownloadInterval,
 		}
 		s.config.UpdateNodeImageTask(req.Name, task)
 		if s.scheduler != nil {
@@ -903,14 +907,15 @@ func (s *Server) nodeImageTaskToMap(task *config.NodeImageSyncTask) map[string]i
 		syncMode = "incremental"
 	}
 	return map[string]interface{}{
-		"name":        task.Name,
-		"type":        "nodeimage",
-		"enabled":     task.Enabled,
-		"sync_mode":   syncMode,
-		"webdav":      task.WebDAV,
-		"schedule":    task.Schedule,
-		"concurrency": task.Concurrency,
-		"nodeimage":   task.NodeImage,
+		"name":              task.Name,
+		"type":              "nodeimage",
+		"enabled":           task.Enabled,
+		"sync_mode":         syncMode,
+		"webdav":            task.WebDAV,
+		"schedule":          task.Schedule,
+		"concurrency":       task.Concurrency,
+		"download_interval": task.DownloadInterval,
+		"nodeimage":         task.NodeImage,
 	}
 }
 

@@ -48,14 +48,15 @@ type LocalBackupTask struct {
 }
 
 type NodeImageSyncTask struct {
-	Name        string          `yaml:"name" json:"name"`
-	Type        string          `yaml:"type" json:"type"`
-	Enabled     bool            `yaml:"enabled" json:"enabled"`
-	SyncMode    string          `yaml:"sync_mode" json:"sync_mode"`
-	NodeImage   NodeImageConfig `yaml:"nodeimage" json:"nodeimage"`
-	WebDAV      []string        `yaml:"webdav" json:"webdav"`
-	Schedule    ScheduleConfig  `yaml:"schedule" json:"schedule"`
-	Concurrency int             `yaml:"concurrency" json:"concurrency"`
+	Name             string          `yaml:"name" json:"name"`
+	Type             string          `yaml:"type" json:"type"`
+	Enabled          bool            `yaml:"enabled" json:"enabled"`
+	SyncMode         string          `yaml:"sync_mode" json:"sync_mode"`
+	NodeImage        NodeImageConfig `yaml:"nodeimage" json:"nodeimage"`
+	WebDAV           []string        `yaml:"webdav" json:"webdav"`
+	Schedule         ScheduleConfig  `yaml:"schedule" json:"schedule"`
+	Concurrency      int             `yaml:"concurrency" json:"concurrency"`
+	DownloadInterval int             `yaml:"download_interval" json:"download_interval"`
 }
 
 type NodeImageConfig struct {

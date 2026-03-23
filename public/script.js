@@ -491,6 +491,7 @@ function showTaskModal(editData = null) {
             document.getElementById('task-api-key').value = editData.nodeimage?.api_key || '';
             document.getElementById('task-cookie').value = editData.nodeimage?.cookie || '';
             document.getElementById('task-base-path').value = editData.nodeimage?.base_path || '';
+            document.getElementById('task-download-interval').value = editData.download_interval || 0;
             updateSyncModeHints();
         } else {
             document.getElementById('task-paths').value = (editData.paths || []).map(p => p.path).join('\n');
@@ -612,6 +613,7 @@ async function handleTaskSubmit(e) {
             cookie: document.getElementById('task-cookie').value,
             base_path: document.getElementById('task-base-path').value
         };
+        taskData.download_interval = parseInt(document.getElementById('task-download-interval').value) || 0;
     } else {
         const excludePaths = document.getElementById('task-exclude-paths').value.split('\n').filter(p => p.trim()).map(p => p.trim());
         taskData.paths = document.getElementById('task-paths').value.split('\n').filter(p => p.trim()).map(p => ({ 
