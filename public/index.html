@@ -78,7 +78,11 @@
             <section id="logs-tab" class="card hidden">
                 <div class="card-header">
                     <h2>实时日志</h2>
-                    <button class="btn-icon" id="clear-log-btn">清除日志</button>
+                    <div class="log-controls">
+                        <button class="btn-icon log-filter active" id="log-filter-info">INFO</button>
+                        <button class="btn-icon log-filter" id="log-filter-debug">DEBUG</button>
+                        <button class="btn-icon" id="clear-log-btn">清除日志</button>
+                    </div>
                 </div>
                 <div id="log-container"></div>
             </section>

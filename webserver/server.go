@@ -50,6 +50,15 @@ type LogEntry struct {
 	Time    string `json:"time"`
 	Level   string `json:"level"`
 	Message string `json:"message"`
+	Type    string `json:"type,omitempty"`    // "history" 或 "realtime"
+	BatchID string `json:"batchId,omitempty"` // 批次ID，用于前端识别历史日志批次
+}
+
+// LogBatchEnd 日志批次结束标记
+type LogBatchEnd struct {
+	Type    string `json:"type"`    // "batch_end"
+	BatchID string `json:"batchId"` // 批次ID
+	Count   int    `json:"count"`   // 批次中日志数量
 }
 
 func NewServer(cfg *config.Config, taskFunc scheduler.TaskFunc, staticFS fs.FS) *Server {
@@ -69,6 +78,7 @@ func (s *Server) broadcastLog(level, msg string) {
 		Time:    time.Now().Format("2006-01-02 15:04:05"),
 		Level:   level,
 		Message: msg,
+		Type:    "realtime", // 标记为实时日志
 	}
 
 	s.logMu.Lock()
@@ -149,8 +159,25 @@ func (s *Server) handleWebSocket(ws *websocket.Conn) {
 	copy(history, s.logBuffer)
 	s.logMu.Unlock()
 
-	for i := len(history) - 1; i >= 0; i-- {
-		websocket.JSON.Send(ws, history[i])
+	// 生成批次ID（使用时间戳）
+	batchID := time.Now().Format("20060102150405")
+
+	// 正序发送历史日志（从最旧到最新）
+	for i := 0; i < len(history); i++ {
+		entry := history[i]
+		entry.Type = "history" // 标记为历史日志
+		entry.BatchID = batchID
+		websocket.JSON.Send(ws, entry)
+	}
+
+	// 发送批次结束标记
+	if len(history) > 0 {
+		batchEnd := LogBatchEnd{
+			Type:    "batch_end",
+			BatchID: batchID,
+			Count:   len(history),
+		}
+		websocket.JSON.Send(ws, batchEnd)
 	}
 
 	defer func() {

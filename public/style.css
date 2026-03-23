@@ -135,7 +135,31 @@ header p {
 }
 
 .log-time {
-    color: #888;
+    color: #6a6a6a;
+}
+
+.log-level-INFO {
+    color: #34c759;
+    font-weight: 500;
+}
+
+.log-level-WARN {
+    color: #fc0;
+    font-weight: 500;
+}
+
+.log-level-ERROR {
+    color: #ff453a;
+    font-weight: 500;
+}
+
+.log-level-DEBUG {
+    color: #00aade;
+    font-weight: 500;
+}
+
+.log-message {
+    color: #e5e7eb;
 }
 
 .log-INFO {
@@ -152,6 +176,22 @@ header p {
 
 .log-DEBUG {
     color: #00aade;
+}
+
+.log-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.log-filter {
+    transition: all 0.2s;
+}
+
+.log-filter.active {
+    background-color: var(--primary-color);
+    color: #3a484c;
+    border-color: var(--primary-color);
 }
 
 .actions-container {

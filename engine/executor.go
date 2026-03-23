@@ -364,27 +364,38 @@ func (e *Executor) addFileToZip(zipWriter *zip.Writer, filePath string, info os.
 }
 
 func (e *Executor) ExecuteNodeImageTask(task *config.NodeImageSyncTask, webdavClients map[string]*webdav.EnhancedClient) error {
+	startTime := time.Now()
 	syncMode := task.SyncMode
 	if syncMode == "" {
 		syncMode = "incremental"
 	}
 
 	isFullSync := syncMode == "full"
-
-	logger.Info("[NodeImage] 开始执行任务 '%s'", task.Name)
+	syncModeText := "增量同步 (API Key)"
 	if isFullSync {
-		logger.Info("  -> 同步模式: 全量同步 (Cookie)")
+		syncModeText = "全量同步 (Cookie)"
+	}
+
+	// 开始标志
+	logger.Info("<----- 同步开始 (%s) ----->", syncModeText)
+	logger.Info("[1/3] 验证配置...")
+
+	// 验证配置
+	if isFullSync {
 		if task.NodeImage.Cookie == "" {
+			logger.Error("✗ 全量同步需要配置 Cookie")
 			return fmt.Errorf("全量同步需要配置 Cookie")
 		}
 	} else {
-		logger.Info("  -> 同步模式: 增量同步 (API Key)")
 		if task.NodeImage.APIKey == "" {
+			logger.Error("✗ 增量同步需要配置 API Key")
 			return fmt.Errorf("增量同步需要配置 API Key")
 		}
 	}
-	logger.Info("  -> 目标服务器: %v", task.WebDAV)
-	logger.Info("  -> 调度: %s", task.Schedule.String())
+	logger.Info("  ✓ 配置验证通过")
+
+	// 扫描远程文件
+	logger.Info("[2/3] 扫描远程文件...")
 
 	apiURL := task.NodeImage.APIURL
 	if apiURL == "" {
@@ -397,25 +408,27 @@ func (e *Executor) ExecuteNodeImageTask(task *config.NodeImageSyncTask, webdavCl
 		apiURL,
 	)
 
-	logger.Info("[NodeImage] 获取图片列表...")
 	var images []nodeimage.ImageInfo
 	var err error
 
 	if isFullSync {
-		logger.Info("[NodeImage] 测试连接...")
 		if err := client.TestConnection(); err != nil {
+			logger.Error("✗ NodeImage连接测试失败: %v", err)
 			return fmt.Errorf("NodeImage连接测试失败: %w", err)
 		}
-		logger.Info("[NodeImage] 连接测试成功")
 		images, err = client.GetImageListCookie()
 	} else {
 		images, err = client.GetImageListAPIKey()
 	}
 
 	if err != nil {
+		logger.Error("✗ 获取图片列表失败: %v", err)
 		return fmt.Errorf("获取图片列表失败: %w", err)
 	}
-	logger.Info("[NodeImage] 获取到 %d 张图片", len(images))
+	logger.Info("  -> [NodeImage] 发现 %d 张图片", len(images))
+
+	// 执行同步
+	logger.Info("[3/3] 执行同步...")
 
 	for _, webdavName := range task.WebDAV {
 		var wdClient *webdav.EnhancedClient
@@ -427,12 +440,12 @@ func (e *Executor) ExecuteNodeImageTask(task *config.NodeImageSyncTask, webdavCl
 
 		if !exists {
 			if e.config == nil {
-				logger.Error("[NodeImage] WebDAV服务器 '%s' 不存在且配置未加载", webdavName)
+				logger.Error("  ✗ WebDAV服务器 '%s' 不存在且配置未加载", webdavName)
 				continue
 			}
 			wdCfg := e.config.GetWebDAVByName(webdavName)
 			if wdCfg == nil {
-				logger.Error("[NodeImage] WebDAV服务器 '%s' 不存在", webdavName)
+				logger.Error("  ✗ WebDAV服务器 '%s' 不存在", webdavName)
 				continue
 			}
 			wdClient = webdav.NewEnhancedClient(webdav.EnhancedConfig{
@@ -445,17 +458,20 @@ func (e *Executor) ExecuteNodeImageTask(task *config.NodeImageSyncTask, webdavCl
 		}
 
 		if err := e.syncToWebDAV(wdClient, images, task, isFullSync); err != nil {
-			logger.Error("[NodeImage->%s] 同步失败: %v", webdavName, err)
-		} else {
-			logger.Info("[NodeImage->%s] 同步完成", webdavName)
+			logger.Error("  ✗ 同步到 %s 失败: %v", webdavName, err)
 		}
 	}
+
+	// 结束标志
+	elapsed := time.Since(startTime)
+	logger.Info("<----- 同步完成，耗时: %.0fs ----->", elapsed.Seconds())
 
 	return nil
 }
 
 func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimage.ImageInfo, task *config.NodeImageSyncTask, isFullSync bool) error {
-	logger.Info("[NodeImage->%s] 开始同步到WebDAV", client.GetName())
+	serverName := client.GetName()
+	logger.Info("  -> [%s] 开始同步", serverName)
 
 	basePath := task.NodeImage.BasePath
 	if basePath == "" {
@@ -477,7 +493,7 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 	var existingFiles []webdav.FileInfo
 	if cachedFiles != nil {
 		existingFiles = cachedFiles
-		logger.Info("[NodeImage->%s] 从缓存加载 %d 个文件", client.GetName(), len(existingFiles))
+		logger.Info("  -> [%s] 从缓存加载 %d 个文件", serverName, len(existingFiles))
 	} else {
 		var err error
 		existingFiles, err = client.ListFiles(basePath)
@@ -487,7 +503,7 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 			webdavCacheMu.Lock()
 			setCacheWithLimit(existingFiles)
 			webdavCacheMu.Unlock()
-			logger.Info("[NodeImage->%s] 发现 %d 个文件", client.GetName(), len(existingFiles))
+			logger.Info("  -> [%s] 发现 %d 个文件", serverName, len(existingFiles))
 		}
 	}
 
@@ -513,13 +529,13 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 	}
 
 	if len(filesToUpload) == 0 && len(filesToDelete) == 0 {
-		logger.Info("[NodeImage->%s] 文件已是最新状态，无需操作", client.GetName())
+		logger.Info("  -> [%s] ✅ 文件已是最新状态，无需操作", serverName)
 		return nil
 	}
 
-	logger.Info("[NodeImage->%s] 计划上传: %d 张图片", client.GetName(), len(filesToUpload))
+	logger.Info("  -> [%s] 计划上传: %d 张图片", serverName, len(filesToUpload))
 	if isFullSync && len(filesToDelete) > 0 {
-		logger.Info("[NodeImage->%s] 计划删除: %d 个文件", client.GetName(), len(filesToDelete))
+		logger.Info("  -> [%s] 计划删除: %d 个文件", serverName, len(filesToDelete))
 	}
 
 	var wg sync.WaitGroup
@@ -544,7 +560,7 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 
 			remotePath := fmt.Sprintf("%s/%s", basePath, img.Filename)
 			if err := e.uploadImage(client, img, remotePath); err != nil {
-				logger.Error("[NodeImage->%s] 上传失败 %s: %v", client.GetName(), img.Filename, err)
+				logger.Error("    ✗ 上传失败 %s: %v", img.Filename, err)
 				mu.Lock()
 				uploadErrCount++
 				mu.Unlock()
@@ -554,7 +570,7 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 				progress := uploadCount * 100 / len(filesToUpload)
 				progress = progress / 10 * 10
 				if progress > lastProgress {
-					logger.Info("[NodeImage->%s] 上传进度: %d/%d (%d%%)", client.GetName(), uploadCount, len(filesToUpload), progress)
+					logger.Info("  -> [%s] 上传进度: %d/%d (%d%%)", serverName, uploadCount, len(filesToUpload), progress)
 					lastProgress = progress
 				}
 				mu.Unlock()
@@ -572,12 +588,11 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 				defer func() { <-semaphore }()
 
 				if err := client.Delete(path); err != nil {
-					logger.Error("[NodeImage->%s] 删除失败 %s: %v", client.GetName(), filepath.Base(path), err)
+					logger.Error("    ✗ 删除失败 %s: %v", filepath.Base(path), err)
 					mu.Lock()
 					deleteErrCount++
 					mu.Unlock()
 				} else {
-					logger.Info("[NodeImage->%s] 删除成功: %s", client.GetName(), filepath.Base(path))
 					mu.Lock()
 					deleteCount++
 					mu.Unlock()
@@ -592,13 +607,13 @@ func (e *Executor) syncToWebDAV(client *webdav.EnhancedClient, images []nodeimag
 		InvalidateWebdavCache()
 	}
 
-	logger.Info("[NodeImage->%s] 同步完成 - 上传: %d (失败: %d), 删除: %d (失败: %d)",
-		client.GetName(), uploadCount, uploadErrCount, deleteCount, deleteErrCount)
-
 	if uploadErrCount > 0 || deleteErrCount > 0 {
+		logger.Error("  -> [%s] ✗ 同步完成 - 上传: %d (失败: %d), 删除: %d (失败: %d)",
+			serverName, uploadCount, uploadErrCount, deleteCount, deleteErrCount)
 		return fmt.Errorf("部分操作失败: 上传失败 %d, 删除失败 %d", uploadErrCount, deleteErrCount)
 	}
 
+	logger.Info("  -> [%s] ✅ 同步完成 - 上传: %d, 删除: %d", serverName, uploadCount, deleteCount)
 	return nil
 }
 

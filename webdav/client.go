@@ -285,14 +285,14 @@ func (c *EnhancedClient) listFilesPage(requestPath, basePath string) ([]FileInfo
 	var response propfindResponse
 	if err := xml.Unmarshal(bodyBytes, &response); err != nil {
 		// 尝试保存响应到临时文件以便调试
-		logger.Error("解析XML失败，响应内容: %s", string(bodyBytes))
+		logger.Error("  -> [%s] 解析XML失败，响应内容: %s", c.Name, string(bodyBytes))
 		return nil, "", fmt.Errorf("解析XML响应失败: %w", err)
 	}
 
 	if len(response.Responses) == 0 {
-		logger.Warn("未解析到任何文件响应")
+		logger.Warn("  -> [%s] 未解析到任何文件响应", c.Name)
 	} else {
-		logger.Info("解析到 %d 个响应", len(response.Responses))
+		logger.Info("  -> [%s] 解析到 %d 个响应", c.Name, len(response.Responses))
 	}
 
 	var files []FileInfo
@@ -300,7 +300,7 @@ func (c *EnhancedClient) listFilesPage(requestPath, basePath string) ([]FileInfo
 		// 使用 PathUnescape 而不是 QueryUnescape（WebDAV Href 是 URL 路径）
 		decodedHref, err := url.PathUnescape(r.Href)
 		if err != nil {
-			logger.Warn("URL 解码失败: %v, 原始 Href: %s", err, r.Href)
+			logger.Warn("  -> [%s] URL 解码失败: %v, 原始 Href: %s", c.Name, err, r.Href)
 			continue
 		}
 
@@ -324,12 +324,12 @@ func (c *EnhancedClient) listFilesPage(requestPath, basePath string) ([]FileInfo
 		}
 
 		if successPropstat == nil {
-			logger.Warn("文件 %s 没有成功的 propstat，跳过", decodedHref)
+			logger.Warn("  -> [%s] 文件 %s 没有成功的 propstat，跳过", c.Name, decodedHref)
 			continue
 		}
 
 		if successPropstat.Prop.GetContentLength == "" {
-			logger.Warn("文件 %s 缺少 contentlength 属性，可能是特殊文件", decodedHref)
+			logger.Warn("  -> [%s] 文件 %s 缺少 contentlength 属性，可能是特殊文件", c.Name, decodedHref)
 			continue
 		}
 
@@ -439,12 +439,7 @@ func (c *EnhancedClient) TestConnection() error {
 }
 
 func (c *EnhancedClient) EnsureDirectory(path string) error {
-	files, err := c.ListFiles(path)
-	if err == nil && len(files) >= 0 {
-		return nil
-	}
-
-	logger.Info("[%s] 创建目录: %s", c.Name, path)
+	// 直接尝试创建目录，Mkdir 会正确处理目录已存在的情况（返回 405 或 200）
 	return c.Mkdir(path)
 }
 

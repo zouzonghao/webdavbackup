@@ -1,5 +1,14 @@
 let ws;
 let webdavServers = [];
+let logs = []; // 日志数组（按插入顺序）
+const MAX_LOGS = 500; // 最大日志数量
+let historyBatch = []; // 临时存储历史日志批次
+
+// 日志过滤设置
+let logFilters = {
+    INFO: true,
+    DEBUG: false
+};
 
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
@@ -128,6 +137,10 @@ function initModals() {
     document.getElementById('add-webdav-btn').addEventListener('click', () => showWebdavModal());
     document.getElementById('clear-log-btn').addEventListener('click', clearLogs);
 
+    // 日志过滤按钮
+    document.getElementById('log-filter-info').addEventListener('click', () => toggleLogFilter('INFO'));
+    document.getElementById('log-filter-debug').addEventListener('click', () => toggleLogFilter('DEBUG'));
+
     document.getElementById('task-type').addEventListener('change', updateTaskFormFields);
     document.getElementById('task-schedule-type').addEventListener('change', updateScheduleFields);
     document.getElementById('task-sync-mode').addEventListener('change', updateSyncModeHints);
@@ -143,51 +156,162 @@ function connectWebSocket() {
     ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
     ws.onopen = () => {
-        addLog('WebSocket 连接成功', 'INFO');
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('zh-CN', { hour12: false });
+        addRealtimeLog('WebSocket 连接成功', 'INFO', timeStr);
     };
 
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        const timestamp = data.time || data.Time || new Date().toLocaleTimeString();
-        addLog(data.message || data.Message, data.level || data.Level || 'INFO', timestamp);
+        handleWebSocketMessage(data);
     };
 
     ws.onclose = () => {
-        addLog('WebSocket 连接断开，3秒后重连...', 'WARN');
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('zh-CN', { hour12: false });
+        addRealtimeLog('WebSocket 连接断开，3秒后重连...', 'WARN', timeStr);
         setTimeout(connectWebSocket, 3000);
     };
 
     ws.onerror = (error) => {
         console.error('WebSocket error:', error);
-        addLog('WebSocket 连接错误', 'ERROR');
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('zh-CN', { hour12: false });
+        addRealtimeLog('WebSocket 连接错误', 'ERROR', timeStr);
     };
 }
 
-let userScrolledToBottom = true;
+// 添加历史日志（替换整个数组）
+function addHistoryLogs(historyLogs) {
+    logs = historyLogs.slice(-MAX_LOGS); // 限制数量
+    renderLogs();
+    scrollToBottom();
+}
 
-function addLog(message, level, timestamp) {
+// 添加实时日志（追加到末尾）
+function addRealtimeLog(message, level, time) {
+    logs.push({
+        time: time,
+        level: level.toUpperCase(),
+        message: message
+    });
+    
+    // 限制数量
+    if (logs.length > MAX_LOGS) {
+        logs = logs.slice(-MAX_LOGS);
+    }
+    
+    renderLogs();
+    scrollToBottom();
+}
+
+// 处理 WebSocket 消息
+function handleWebSocketMessage(data) {
+    // 检查是否是批次结束标记
+    if (data.type === 'batch_end') {
+        console.log(`收到历史日志批次结束标记，批次ID: ${data.batchId}, 数量: ${data.count}`);
+        
+        // 批量处理历史日志
+        if (historyBatch.length > 0) {
+            addHistoryLogs(historyBatch);
+            historyBatch = [];
+        }
+        return;
+    }
+    
+    // 处理日志条目
+    if (data.time && data.level && data.message) {
+        if (data.type === 'history') {
+            // 历史日志：临时存储
+            historyBatch.push({
+                time: data.time,
+                level: data.level,
+                message: data.message
+            });
+        } else {
+            // 实时日志：立即处理
+            addRealtimeLog(data.message, data.level, data.time);
+        }
+    }
+}
+
+// 渲染日志到容器
+function renderLogs() {
     const container = document.getElementById('log-container');
-    const p = document.createElement('p');
-    p.className = `log-${level.toUpperCase()}`;
-    const timeStr = timestamp || new Date().toLocaleTimeString();
-    p.textContent = `[${timeStr}] [${level.toUpperCase()}] ${message}`;
-    container.appendChild(p);
+    if (!container) return;
 
-    // 只有当用户滚动到最底部时才自动滚动
-    if (userScrolledToBottom) {
+    // 清空容器
+    container.innerHTML = '';
+
+    // 按时间正序渲染日志（最新的在底部）
+    logs.forEach(log => {
+        // 应用过滤规则
+        if (log.level === 'DEBUG' && !logFilters.DEBUG) return;
+        if (log.level === 'INFO' && !logFilters.INFO) return;
+
+        const p = document.createElement('p');
+
+        // 解析日志消息，提取时间戳、级别和消息内容
+        const timeMatch = log.time.match(/\[?([^\]]+)\]?/);
+        const timeStr = timeMatch ? timeMatch[1] : log.time;
+
+        // 创建带样式的日志内容
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'log-time';
+        timeSpan.textContent = `[${timeStr}] `;
+
+        const levelSpan = document.createElement('span');
+        levelSpan.className = `log-level-${log.level}`;
+        levelSpan.textContent = `[${log.level}] `;
+
+        const messageSpan = document.createElement('span');
+        messageSpan.className = 'log-message';
+        messageSpan.textContent = log.message;
+
+        // 根据消息内容添加特殊样式
+        if (log.message.includes('✅') || log.message.includes('完成') && log.level === 'INFO') {
+            messageSpan.style.color = '#f0f0f0'; // 较亮的白色
+        } else if (log.message.includes('✗') || log.level === 'ERROR') {
+            messageSpan.style.color = '#ff6b6b'; // 错误消息用稍亮的红色
+        }
+
+        p.appendChild(timeSpan);
+        p.appendChild(levelSpan);
+        p.appendChild(messageSpan);
+
+        container.appendChild(p);
+    });
+}
+
+// 滚动到底部
+function scrollToBottom() {
+    const container = document.getElementById('log-container');
+    if (container) {
         container.scrollTop = container.scrollHeight;
     }
 }
 
-// 监听滚动事件，判断用户是否滚动到最底部
-document.getElementById('log-container').addEventListener('scroll', function() {
-    const container = this;
-    const threshold = 50; // 误差阈值
-    userScrolledToBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < threshold;
-});
-
 function clearLogs() {
-    document.getElementById('log-container').innerHTML = '';
+    logs = [];
+    historyBatch = [];
+    const container = document.getElementById('log-container');
+    if (container) {
+        container.innerHTML = '';
+    }
+}
+
+// 切换日志过滤
+function toggleLogFilter(level) {
+    logFilters[level] = !logFilters[level];
+    
+    // 更新按钮样式
+    const btn = document.getElementById(`log-filter-${level.toLowerCase()}`);
+    if (btn) {
+        btn.classList.toggle('active', logFilters[level]);
+    }
+    
+    // 重新渲染日志
+    renderLogs();
 }
 
 async function api(method, url, data) {
@@ -546,7 +670,6 @@ async function runTask(name) {
         if (result.success) {
             // 显示成功的 Toast 通知
             showToast('success', '任务启动成功', `任务 "${name}" 已开始执行`, 3000);
-            addLog(`任务 ${name} 开始执行`, 'INFO');
             
             // 自动跳转到实时日志标签页
             setTimeout(() => {
